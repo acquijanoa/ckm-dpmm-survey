@@ -1,0 +1,601 @@
+\begin{thebibliography}{64}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[Blumer and Rodriguez(2021)]{blumer2021heterogeneity}
+Vanessa Blumer and Fatima Rodriguez.
+\newblock Heterogeneity, nativity, and disaggregation of cardiovascular risk
+  and outcomes in hispanic americans.
+\newblock In \emph{Contemporary Cardiology: Cardiovascular Disease in Racial
+  and Ethnic Minority Populations}. Springer, 2021.
+\newblock \doi{10.1007/978-3-030-81034-4_8}.
+
+\bibitem[Cort{\'e}s-Bergoderi et~al.(2013)Cort{\'e}s-Bergoderi, Goel, Murad,
+  Allison, Somers, Erwin, Sochor, and
+  Lopez-Jimenez]{cortesbergoderi2013paradox}
+Mery Cort{\'e}s-Bergoderi, Kashish Goel, Mohammad~Hassan Murad, Thomas Allison,
+  Virend~K. Somers, Patricia~J. Erwin, Ondrej Sochor, and Francisco
+  Lopez-Jimenez.
+\newblock Cardiovascular mortality in hispanics compared to non-hispanic
+  whites: a systematic review and meta-analysis of the hispanic paradox.
+\newblock \emph{European Journal of Internal Medicine}, 2013.
+\newblock \doi{10.1016/j.ejim.2013.09.003}.
+
+\bibitem[Balfour et~al.(2016)Balfour, Ruiz, Talavera, Allison, and
+  Rodriguez]{balfour2016cvd}
+Pilar~C. Balfour, John~M. Ruiz, Gregory~A. Talavera, Matthew~A. Allison, and
+  Carlos~J. Rodriguez.
+\newblock Cardiovascular disease in hispanics/latinos in the united states.
+\newblock \emph{Journal of Latina/o Psychology}, 2016.
+\newblock \doi{10.1037/lat0000056}.
+
+\bibitem[Rodriguez et~al.(2017{\natexlab{a}})Rodriguez, Hastings, Boothroyd,
+  Echeverria, L{\'o}pez, Cullen, Harrington, and
+  Palaniappan]{rodriguez2017disaggregation}
+Fatima Rodriguez, Katherine~G. Hastings, Derek~B. Boothroyd, Sandra Echeverria,
+  Lenny L{\'o}pez, Mark Cullen, Robert~A. Harrington, and Latha~P. Palaniappan.
+\newblock Disaggregation of cause-specific cardiovascular disease mortality
+  among hispanic subgroups.
+\newblock \emph{JAMA Cardiology}, 2017{\natexlab{a}}.
+\newblock \doi{10.1001/jamacardio.2016.4653}.
+
+\bibitem[Rodriguez et~al.(2017{\natexlab{b}})Rodriguez, Hastings, Hu,
+  L{\'o}pez, Cullen, Harrington, and Palaniappan]{rodriguez2017nativity}
+Fatima Rodriguez, Katherine~G. Hastings, Jiaqi Hu, Lenny L{\'o}pez, Mark
+  Cullen, Robert~A. Harrington, and Latha~P. Palaniappan.
+\newblock Nativity status and cardiovascular disease mortality among hispanic
+  adults.
+\newblock \emph{Journal of the American Heart Association}, 2017{\natexlab{b}}.
+\newblock \doi{10.1161/JAHA.117.007207}.
+
+\bibitem[Khan et~al.(2022)Khan, Lone, Yedlapati, Dani, Khan, Watson, Parwani,
+  Rodriguez, Cainzos-Achirica, and Michos]{khan2022trends}
+Safi~U. Khan, Ahmad~N. Lone, Siva~H. Yedlapati, Sourbha~S. Dani, Muhammad~Zia
+  Khan, Karol~E. Watson, Purvi~J. Parwani, Fatima Rodriguez, Miguel
+  Cainzos-Achirica, and Erin~D. Michos.
+\newblock Cardiovascular disease mortality among hispanic versus non-hispanic
+  white adults in the united states, 1999 to 2018.
+\newblock \emph{Journal of the American Heart Association}, 2022.
+\newblock \doi{10.1161/JAHA.121.022857}.
+
+\bibitem[Ricardo et~al.(2015)Ricardo, Flessner, Eckfeldt, Eggers, Franceschini,
+  Go, Gotman, Kramer, Kusek, Loehr, Melamed, Peralta, Raij, Rosas, Talavera,
+  and Lash]{ricardo2015prevalence}
+Ana~C. Ricardo, Michael~F. Flessner, John~H. Eckfeldt, Paul~W. Eggers, Nora
+  Franceschini, Alan~S. Go, Nathan~M. Gotman, Holly Kramer, John~W. Kusek,
+  Laura~R. Loehr, Michal~L. Melamed, Carmen~A. Peralta, Leopoldo Raij,
+  Sylvia~E. Rosas, Gregory~A. Talavera, and James~P. Lash.
+\newblock Prevalence and correlates of ckd in hispanics/latinos in the united
+  states.
+\newblock \emph{Clinical Journal of the American Society of Nephrology}, 2015.
+\newblock \doi{10.2215/CJN.02020215}.
+
+\bibitem[Peralta et~al.(2006)Peralta, Shlipak, Fan, Ordo{\~n}ez, Lash, Chertow,
+  and Go]{peralta2006risks}
+Carmen~A. Peralta, Michael~G. Shlipak, Dongjie Fan, Juan Ordo{\~n}ez, James~P.
+  Lash, Glenn~M. Chertow, and Alan~S. Go.
+\newblock Risks for end-stage renal disease, cardiovascular events, and death
+  in hispanic versus non-hispanic white adults with chronic kidney disease.
+\newblock \emph{Journal of the American Society of Nephrology}, 2006.
+\newblock \doi{10.1681/ASN.2005101122}.
+
+\bibitem[Desai et~al.(2018)Desai, Lora, Lash, and Ricardo]{desai2018ckdesrd}
+Nishi Desai, Claudia~M. Lora, James~P. Lash, and Ana~C. Ricardo.
+\newblock Ckd and esrd in us hispanics.
+\newblock \emph{American Journal of Kidney Diseases}, 2018.
+\newblock \doi{10.1053/j.ajkd.2018.02.354}.
+
+\bibitem[Schneiderman et~al.(2014)Schneiderman, Llabre, Cowie, Barnhart,
+  Carnethon, Gallo, Giachello, Heiss, Kaplan, LaVange, Teng, Villa-Caballero,
+  and Avil{\'e}s-Santa]{schneiderman2014diabetes}
+Neil Schneiderman, Maria~M. Llabre, Catherine~C. Cowie, Janet Barnhart,
+  Mercedes Carnethon, Linda~C. Gallo, Aida~L. Giachello, Gerardo Heiss,
+  Robert~C. Kaplan, Lisa LaVange, Yanping Teng, Lorena Villa-Caballero, and
+  M.~Larissa Avil{\'e}s-Santa.
+\newblock Prevalence of diabetes among hispanics/latinos from diverse
+  backgrounds: The hispanic community health study/study of latinos (hchs/sol).
+\newblock \emph{Diabetes Care}, 2014.
+\newblock \doi{10.2337/dc13-2939}.
+
+\bibitem[Cordero et~al.(2022)Cordero, Schneiderman, Llabre, Teng, Daviglus,
+  Cowie, Cai, Talavera, Gallo, Kaplan, Cespedes~Feliciano, Giacinto, Giachello,
+  and Avil{\'e}s-Santa]{cordero2022incidence}
+Christina Cordero, Neil Schneiderman, Maria~M. Llabre, Yanping Teng, Martha~L.
+  Daviglus, Catherine~C. Cowie, Jianwen Cai, Gregory~A. Talavera, Linda~C.
+  Gallo, Robert~C. Kaplan, Elizabeth~M. Cespedes~Feliciano, Rebeca~Espinoza
+  Giacinto, Aida~L. Giachello, and M.~Larissa Avil{\'e}s-Santa.
+\newblock Diabetes incidence among hispanic/latino adults in the hispanic
+  community health study/study of latinos (hchs/sol).
+\newblock \emph{Diabetes Care}, 2022.
+\newblock \doi{10.2337/dc21-1543}.
+
+\bibitem[Heiss et~al.(2014)Heiss, Snyder, Teng, Schneiderman, Llabre, Cowie,
+  Carnethon, Kaplan, Giachello, Gallo, Loehr, and
+  Avil{\'e}s-Santa]{heiss2014prevalence}
+Gerardo Heiss, Michelle~L. Snyder, Yanping Teng, Neil Schneiderman, Maria~M.
+  Llabre, Catherine Cowie, Mercedes Carnethon, Robert Kaplan, Aida Giachello,
+  Linda Gallo, Laura Loehr, and Larissa~M. Avil{\'e}s-Santa.
+\newblock Prevalence of metabolic syndrome among hispanics/latinos of diverse
+  background: The hispanic community health study/study of latinos.
+\newblock \emph{Diabetes Care}, 37\penalty0 (8):\penalty0 2391--2399, 2014.
+\newblock \doi{10.2337/dc13-2505}.
+
+\bibitem[L{\'o}pez and Golden(2014)]{lopezgolden2014disparities}
+Lenny L{\'o}pez and Sherita~Hill Golden.
+\newblock A new era in understanding diabetes disparities among u.s.
+  latinos---all are not equal.
+\newblock \emph{Diabetes Care}, 37\penalty0 (8):\penalty0 2081--2083, 2014.
+\newblock \doi{10.2337/dc14-0923}.
+
+\bibitem[Ding et~al.(2023)Ding, Lu, Herrin, Zhang, and
+  Marrero]{ding2023uncovering}
+Qingxia Ding, Yuan Lu, Jeph Herrin, Tianyi Zhang, and David~G. Marrero.
+\newblock Uncovering heterogeneous cardiometabolic risk profiles in us adults:
+  the role of social and behavioral determinants of health.
+\newblock \emph{BMJ Open Diabetes Research \& Care}, 2023.
+\newblock \doi{10.1136/bmjdrc-2023-003558}.
+
+\bibitem[Ndumele et~al.(2023{\natexlab{a}})Ndumele, Neeland, Tuttle, Chow,
+  Mathew, Khan, Coresh, Baker-Smith, Carnethon, Despr{\'e}s, Ho, Joseph,
+  Kernan, Khera, Kosiborod, Lekavich, Lewis, Lo, Ozkan, Palaniappan, Patel,
+  Pencina, Powell-Wiley, Sperling, Virani, Wright, Rajgopal~Singh, Elkind, and
+  Rangaswami]{ndumele2023synopsis}
+Chiadi~E. Ndumele, Ian~J. Neeland, Katherine~R. Tuttle, Sheryl~L. Chow, Roy~O.
+  Mathew, Sadiya~S. Khan, Josef Coresh, Carissa~M. Baker-Smith, Mercedes~R.
+  Carnethon, Jean-Pierre Despr{\'e}s, Jennifer~E. Ho, Joshua~J. Joseph,
+  Walter~N. Kernan, Amit Khera, Mikhail~N. Kosiborod, Carolyn Lekavich,
+  Eldrin~F. Lewis, Kevin~B. Lo, Bige Ozkan, Latha Palaniappan, Sonali~S. Patel,
+  Michael~J. Pencina, Tiffany~M. Powell-Wiley, Laurence~S. Sperling, Salim~S.
+  Virani, Jackson~T. Wright, Radhika Rajgopal~Singh, Mitchell S.~V. Elkind, and
+  Janani Rangaswami.
+\newblock A synopsis of the evidence for the science and clinical management of
+  cardiovascular-kidney-metabolic (ckm) syndrome: A scientific statement from
+  the american heart association.
+\newblock \emph{Circulation}, 148\penalty0 (20):\penalty0 1636--1664,
+  2023{\natexlab{a}}.
+\newblock \doi{10.1161/CIR.0000000000001186}.
+
+\bibitem[Ndumele et~al.(2023{\natexlab{b}})Ndumele, Rangaswami, Chow, Neeland,
+  Tuttle, Khan, Coresh, Mathew, Baker-Smith, Carnethon, Despr{\'e}s, Ho,
+  Joseph, Kernan, Khera, Kosiborod, Lekavich, Lewis, Lo, Ozkan, Palaniappan,
+  Patel, Pencina, Powell-Wiley, Sperling, Virani, Wright, Rajgopal~Singh, and
+  Elkind]{ndumele2023advisory}
+Chiadi~E. Ndumele, Janani Rangaswami, Sheryl~L. Chow, Ian~J. Neeland,
+  Katherine~R. Tuttle, Sadiya~S. Khan, Josef Coresh, Roy~O. Mathew, Carissa~M.
+  Baker-Smith, Mercedes~R. Carnethon, Jean-Pierre Despr{\'e}s, Jennifer~E. Ho,
+  Joshua~J. Joseph, Walter~N. Kernan, Amit Khera, Mikhail~N. Kosiborod, Carolyn
+  Lekavich, Eldrin~F. Lewis, Kevin~B. Lo, Bige Ozkan, Latha Palaniappan,
+  Sonali~S. Patel, Michael~J. Pencina, Tiffany~M. Powell-Wiley, Laurence~S.
+  Sperling, Salim~S. Virani, Jackson~T. Wright, Radhika Rajgopal~Singh, and
+  Mitchell S.~V. Elkind.
+\newblock Cardiovascular-kidney-metabolic health: A presidential advisory from
+  the american heart association.
+\newblock \emph{Circulation}, 148\penalty0 (20):\penalty0 1606--1635,
+  2023{\natexlab{b}}.
+\newblock \doi{10.1161/CIR.0000000000001184}.
+
+\bibitem[Bansal et~al.(2024)Bansal, Weiner, and Sarnak]{bansal2024framework}
+Nisha Bansal, Daniel~E. Weiner, and Mark~J. Sarnak.
+\newblock Cardiovascular-kidney-metabolic health syndrome: What does the
+  american heart association framework mean for nephrology?
+\newblock \emph{Journal of the American Society of Nephrology}, 2024.
+\newblock \doi{10.1681/asn.0000000000000323}.
+
+\bibitem[Gunnarsson et~al.(2025)Gunnarsson, Vito, and Unwin]{gunnarsson2025ckm}
+Sophie Gunnarsson, Olivia Vito, and Robert~J. Unwin.
+\newblock Cardiovascular-kidney-metabolic (ckm) syndrome: Prevalence, risks,
+  disease trajectories, and early-stage management.
+\newblock \emph{American Journal of Physiology-Cell Physiology}, 2025.
+\newblock \doi{10.1152/ajpcell.00499.2025}.
+
+\bibitem[Ahanchi et~al.(2026)Ahanchi, de~la Harpe, Delabays, Vollenweider, and
+  Vaucher]{ahanchi2026longterm}
+Nasrin Ahanchi, R{\'e}mi de~la Harpe, Beno{\^i}t Delabays, Peter Vollenweider,
+  and Julien Vaucher.
+\newblock Cardiovascular-kidney-metabolic syndrome and long-term risk of
+  cardiovascular disease and all-cause mortality.
+\newblock \emph{European Journal of Preventive Cardiology}, 2026.
+\newblock \doi{10.1093/eurjpc/zwag394}.
+
+\bibitem[Shen et~al.(2026)Shen, Han, and Ding]{shen2026editorial}
+Yun Shen, Junfeng Han, and Xin Ding.
+\newblock Editorial: Novel strategies for the clinical management of
+  cardiovascular-kidney-metabolic syndrome.
+\newblock \emph{Frontiers in Endocrinology}, 2026.
+\newblock \doi{10.3389/fendo.2026.1818442}.
+
+\bibitem[Claudel and Verma(2023)]{claudel2023stepstep}
+Sophie~E. Claudel and Ashish Verma.
+\newblock Cardiovascular-kidney-metabolic syndrome: A step toward
+  multidisciplinary and inclusive care.
+\newblock \emph{Cell Metabolism}, 2023.
+\newblock \doi{10.1016/j.cmet.2023.10.015}.
+
+\bibitem[Kondeti et~al.(2026)Kondeti, Chakrabarti, Drexler, Mesa, Tremblay,
+  Gallo, Lash, Rosas, Franceschini, Massera, Martinez, Daviglus, Allison, and
+  Elfassy]{kondeti2026progression}
+Pooja Kondeti, Amit~K. Chakrabarti, Yelena Drexler, Rebeca Mesa, Julien~O.
+  Tremblay, Linda~C. Gallo, James~P. Lash, Sylvia~E. Rosas, Nora Franceschini,
+  Daniele Massera, Claudia Martinez, Martha Daviglus, Matthew~A. Allison, and
+  Tali Elfassy.
+\newblock Progression of cardiovascular-kidney-metabolic syndrome among
+  hispanics/latinos in the united states: The hispanic community health
+  study/study of latinos (hchs/sol).
+\newblock \emph{Clinical Journal of the American Society of Nephrology}, 2026.
+\newblock \doi{10.2215/CJN.0000001088}.
+
+\bibitem[Chakrabarti et~al.(2024)Chakrabarti, Kondeti, Mesa, Drexler, Tremblay,
+  Gallo, Lash, Rosas, Franceschini, Massera, Martinez, Daviglus, Allison, and
+  Elfassy]{chakrabarti2024prevalence}
+Amit~K. Chakrabarti, Pooja Kondeti, Rebeca Mesa, Yelena Drexler, Julien~O.
+  Tremblay, Linda~C. Gallo, James Lash, Sylvia~E. Rosas, Nora Franceschini,
+  Daniele Massera, Claudia Martinez, Martha Daviglus, Matthew Allison, and Tali
+  Elfassy.
+\newblock Prevalence of cardiovascular kidney metabolic syndrome among us
+  hispanic/latino participants in the hispanic community health study/study of
+  latinos, 2008-2011.
+\newblock \emph{Journal of the American Society of Nephrology}, 2024.
+\newblock \doi{10.1681/asn.202468bs587d}.
+
+\bibitem[Shelbaya et~al.(2025)Shelbaya, Zeleke, Lamberson, Yang, Ayers,
+  Neeland, Rohatgi, Joshi, Khera, de~Lemos, and Shah]{shelbaya2025dallas}
+Khaled Shelbaya, Yinun Zeleke, Victoria Lamberson, Yimin Yang, Colby Ayers,
+  Ian~J. Neeland, Anand Rohatgi, Parag~H. Joshi, Amit Khera, James~D. de~Lemos,
+  and Amil~M. Shah.
+\newblock Abstract mp35: Community prevalence of the
+  cardiovascular-kidney-metabolic (ckm) syndrome: The dallas heart study.
+\newblock \emph{Circulation}, 151, 2025.
+\newblock \doi{10.1161/cir.151.suppl_1.mp35}.
+
+\bibitem[Fujimoto et~al.(2025)Fujimoto, Kikuchi, Nakai, Konta, Iseki, Tsuruya,
+  Yamagata, Narita, Moriyama, Shibagaki, Kasahara, Kondo, Asahi, Watanabe,
+  Kaikita, and Fujimoto]{fujimoto2025stagespecific}
+Kenta Fujimoto, Masao Kikuchi, Michikazu Nakai, Tsuneo Konta, Kunitoshi Iseki,
+  Kazuhiko Tsuruya, Kunihiro Yamagata, Ichiei Narita, Toshiki Moriyama, Yugo
+  Shibagaki, Masato Kasahara, Masao Kondo, Koichi Asahi, Tsuyoshi Watanabe,
+  Koichi Kaikita, and Shouichi Fujimoto.
+\newblock Stage-specific risks of mortality and renal outcomes in
+  cardiovascular-kidney-metabolic syndrome: findings from a nationwide japanese
+  cohort.
+\newblock \emph{Clinical and Experimental Nephrology}, 2025.
+\newblock \doi{10.1007/s10157-025-02800-x}.
+
+\bibitem[Chen et~al.(2025)Chen, Qi, Yuan, and Fan]{chen2025postmenopausal}
+Jingyuan Chen, Yuqing Qi, Kai Yuan, and Wenjun Fan.
+\newblock Abstract 4369433: Association between cardiovascular-kidney-metabolic
+  syndrome stages and cardiovascular mortality among postmenopausal women:
+  Results from national health and nutrition examination survey.
+\newblock \emph{Circulation}, 152, 2025.
+\newblock \doi{10.1161/circ.152.suppl_3.4369433}.
+
+\bibitem[Ogungbe et~al.(2024)Ogungbe, Aryee, Turkson-Ocran, Ndumele, and
+  Commodore-Mensah]{ogungbe2024disparities}
+Oluwabunmi Ogungbe, Ellen Aryee, Ruth-Alma~N. Turkson-Ocran, Chiadi~E. Ndumele,
+  and Yvonne Commodore-Mensah.
+\newblock Abstract p392: Cardiovascular-kidney-metabolic syndrome burden and
+  disparities in the 2011-2020 national health and nutrition examination
+  survey.
+\newblock \emph{Circulation}, 149, 2024.
+\newblock \doi{10.1161/circ.149.suppl_1.p392}.
+
+\bibitem[Gregg et~al.(2025)Gregg, Bozkurt, and
+  Navaneethan]{gregg2025riskassessment}
+L.~Parker Gregg, Biykem Bozkurt, and Sankar~D. Navaneethan.
+\newblock Risk assessment in cardiovascular-kidney-metabolic syndrome: An
+  opportunity to individualize evidence-based therapy in ckd.
+\newblock \emph{Clinical Journal of the American Society of Nephrology}, 2025.
+\newblock \doi{10.2215/CJN.0000000973}.
+
+\bibitem[Gohda et~al.(2026)Gohda, Kamei, Tanaka, Furuhashi, Sato, Kubota,
+  Sanuki, Tomino, Suzuki, and Murakoshi]{gohda2026refining}
+Tomohito Gohda, Nozomu Kamei, Marenao Tanaka, Masato Furuhashi, Tatsuya Sato,
+  Mitsunobu Kubota, Michiyoshi Sanuki, Yasuhiko Tomino, Yusuke Suzuki, and Maki
+  Murakoshi.
+\newblock Refining the cardiovascular--kidney--metabolic staging system for
+  improved risk stratification of chronic kidney disease progression in type 2
+  diabetes.
+\newblock \emph{Circulation Reports}, 2026.
+\newblock \doi{10.1253/circrep.CR-25-0345}.
+
+\bibitem[Tian et~al.(2026)Tian, Sternberg, Willerding, Schmidt-Ott, Melk, and
+  Schmidt]{tian2026riskbased}
+Zhirui Tian, Maximilian Sternberg, Jonas Willerding, Kai Schmidt-Ott, Anette
+  Melk, and Bernhard Schmidt.
+\newblock Risk-based stratification approach for
+  cardiovascular-kidney-metabolic syndrome stage 2 using a simple algorithm.
+\newblock \emph{medRxiv}, 2026.
+\newblock \doi{10.64898/2026.01.28.26345070}.
+
+\bibitem[Masoumi et~al.(2026)Masoumi, Tarighat-Payma, Shaker, Mehran,
+  Assempoor, Azizi, Adib, Amouzegar, and Khalili]{masoumi2026severity}
+Safdar Masoumi, Mohamadamin Tarighat-Payma, Farhad Shaker, Ladan Mehran,
+  Reihaneh Assempoor, Fereidoun Azizi, Maryam Adib, Atieh Amouzegar, and Davood
+  Khalili.
+\newblock Development and validation of continuous
+  cardiovascular-kidney-metabolic syndrome severity score (cckms-s)
+  complementing ckm staging.
+\newblock \emph{Lipids in Health and Disease}, 2026.
+\newblock \doi{10.1186/s12944-026-02990-7}.
+
+\bibitem[Yang et~al.(2025)Yang, Su, Chang, Wang, and Liu]{yang2025datadriven}
+Mengge Yang, Chang Su, Xiaona Chang, Guang Wang, and Jia Liu.
+\newblock Data-driven cluster analysis identifies distinct types of
+  cardiovascular-kidney-metabolic syndrome.
+\newblock \emph{European Journal of Preventive Cardiology}, 2025.
+\newblock \doi{10.1093/eurjpc/zwaf708}.
+
+\bibitem[Zhou et~al.(2025)Zhou, Sun, Gao, Jiang, Sun, Xu, Zhang, Wang, Xuan,
+  and Ma]{zhou2025metabolomic}
+Meng Zhou, Wenxiu Sun, Yuhan Gao, Bei Jiang, Tianwei Sun, Rui Xu, Xiujuan
+  Zhang, Qian Wang, Qiuhui Xuan, and Shizhan Ma.
+\newblock Metabolomic profiling reveals interindividual metabolic variability
+  and its association with cardiovascular-kidney-metabolic syndrome risk.
+\newblock \emph{Cardiovascular Diabetology}, 2025.
+\newblock \doi{10.1186/s12933-025-02881-8}.
+
+\bibitem[Manne-Goehler et~al.(2025)Manne-Goehler, Venter, Ali, and
+  Franco]{mannegoehler2025rebranding}
+Jennifer Manne-Goehler, W.~D.~Francois Venter, Mohammed~K. Ali, and Julien
+  Franco.
+\newblock Cardiovascular-kidney-metabolic syndrome: A new frontier or simple
+  rebranding?
+\newblock \emph{PLOS Medicine}, 2025.
+\newblock \doi{10.1371/journal.pmed.1004723}.
+
+\bibitem[Cai et~al.(2025)Cai, Huang, and Li]{cai2025hype}
+Xinyi Cai, Hao Huang, and Tuo Li.
+\newblock Cardiovascular-kidney-metabolic: Hype or a focus on front-line
+  health?
+\newblock \emph{Journal of Translational Internal Medicine}, 2025.
+\newblock \doi{10.1515/jtim-2025-0049}.
+
+\bibitem[Arguelles et~al.(2015)Arguelles, Llabre, Sacco, Penedo, Carnethon,
+  Gallo, Lee, Catellier, Gonzalez, Holub, Loehr, Soliman, and
+  Schneiderman]{arguelles2015characterization}
+William Arguelles, Maria~M. Llabre, Ralph~L. Sacco, Frank Penedo, Mercedes
+  Carnethon, Linda~C. Gallo, David~J. Lee, Diane Catellier, Hector~M. Gonzalez,
+  Christina Holub, Laura Loehr, Elsayed Soliman, and Neil Schneiderman.
+\newblock Characterization of metabolic syndrome among diverse
+  hispanics/latinos living in the united states: Latent class analysis from the
+  hispanic community health study/study of latinos (hchs/sol).
+\newblock \emph{International Journal of Cardiology}, 2015.
+\newblock \doi{10.1016/j.ijcard.2015.02.100}.
+
+\bibitem[Riahi et~al.(2018)Riahi, Moamer, Namdari, Mokhayeri, Pourhoseingholi,
+  and Hashemi-Nazari]{riahi2018patterns}
+Sousan~Kolahi Riahi, Soraya Moamer, Meysam Namdari, Yaser Mokhayeri,
+  Mohamad~Amin Pourhoseingholi, and Sayed~Saeed Hashemi-Nazari.
+\newblock Patterns of clustering of the metabolic syndrome components and its
+  association with coronary heart disease in the multi-ethnic study of
+  atherosclerosis (mesa): A latent class analysis.
+\newblock \emph{International Journal of Cardiology}, 2018.
+\newblock \doi{10.1016/j.ijcard.2018.05.080}.
+
+\bibitem[Dahl(2006)]{dahl2006modelbased}
+David~B. Dahl.
+\newblock Model-based clustering for expression data via a dirichlet process
+  mixture model.
+\newblock In \emph{Bayesian Inference for Gene Expression and Proteomics}.
+  Cambridge University Press, 2006.
+
+\bibitem[White et~al.(2012)White, Johnson, Silburn, and
+  Mengersen]{white2012dirichlet}
+Nicole~M. White, Helen~L. Johnson, Peter~A. Silburn, and Kerrie~L. Mengersen.
+\newblock Dirichlet process mixture models for unsupervised clustering of
+  symptoms in parkinson's disease.
+\newblock \emph{Journal of Applied Statistics}, 2012.
+\newblock \doi{10.1080/02664763.2012.710897}.
+
+\bibitem[Liverani et~al.(2013)Liverani, Hastie, Azizi, Papathomas, and
+  Richardson]{liverani2013premium}
+Silvia Liverani, David~I. Hastie, Lamiae Azizi, Michail Papathomas, and Sylvia
+  Richardson.
+\newblock Premium: An r package for profile regression mixture models using
+  dirichlet processes.
+\newblock \emph{Journal of Statistical Software}, 64\penalty0 (7), 2013.
+\newblock \doi{10.18637/jss.v064.i07}.
+
+\bibitem[Kita et~al.(2025)Kita, Gaddes, and Kirigiti]{kita2025enhancing}
+Francis~John Kita, Srinivasa~Rao Gaddes, and Peter~J. Kirigiti.
+\newblock Enhancing cluster accuracy in diabetes multimorbidity with dirichlet
+  process mixture models.
+\newblock \emph{IEEE Access}, 2025.
+\newblock \doi{10.1109/ACCESS.2024.3523340}.
+
+\bibitem[Feng et~al.(2026)Feng, Chew, Liu, Mikuli{\'c}, Ambastha, Leow,
+  Hausenloy, Muthiah, Wang, Ling, Chee, Ong, Chin, Liu, Seow, Merchant, Zhou,
+  Yang, Car, and Foo]{feng2026phenogroups}
+J.~Feng, J.~S.~C. Chew, H.~Liu, N.~Mikuli{\'c}, A.~Ambastha, M.~S.~Y. Leow,
+  D.~J. Hausenloy, M.~Muthiah, W.~Wang, L.~H. Ling, M.~Chee, J.~Ong, C.~W.
+  Chin, D.~Liu, W.~Seow, R.~Merchant, X.~Zhou, Q.~Yang, J.~Car, and R.~S. Foo.
+\newblock Cardiometabolic risk phenogroups from a data-driven classification
+  with expanded risk factors.
+\newblock \emph{medRxiv}, 2026.
+\newblock \doi{10.64898/2026.06.15.26355645}.
+
+\bibitem[Sorlie et~al.(2010)Sorlie, Avil{\'e}s-Santa, Wassertheil-Smoller,
+  Kaplan, Daviglus, Giachello, Schneiderman, Raij, Talavera, Allison, LaVange,
+  Chambless, and Heiss]{sorlie2010design}
+Paul~D. Sorlie, L.~Maria Avil{\'e}s-Santa, Sylvia Wassertheil-Smoller,
+  Robert~C. Kaplan, Martha~L. Daviglus, Aida~L. Giachello, Neil Schneiderman,
+  Leopoldo Raij, Gregory Talavera, Matthew Allison, Lisa LaVange, Lloyd~E.
+  Chambless, and Gerardo Heiss.
+\newblock Design and implementation of the hispanic community health
+  study/study of latinos.
+\newblock \emph{Annals of Epidemiology}, 20\penalty0 (8):\penalty0 629--641,
+  2010.
+\newblock \doi{10.1016/j.annepidem.2010.03.015}.
+
+\bibitem[LaVange et~al.(2010)LaVange, Kalsbeek, Sorlie, Avil{\'e}s-Santa,
+  Kaplan, Barnhart, Liu, Giachello, Lee, Ryan, Criqui, and
+  Elder]{lavange2010sample}
+Lisa~M. LaVange, William~D. Kalsbeek, Paul~D. Sorlie, L.~Maria
+  Avil{\'e}s-Santa, Robert~C. Kaplan, Janet Barnhart, Kiang Liu, Aida
+  Giachello, David~J. Lee, John Ryan, Michael~H. Criqui, and John~P. Elder.
+\newblock Sample design and cohort selection in the hispanic community health
+  study/study of latinos.
+\newblock \emph{Annals of Epidemiology}, 20\penalty0 (8):\penalty0 642--649,
+  2010.
+\newblock \doi{10.1016/j.annepidem.2010.05.006}.
+
+\bibitem[Lin et~al.(2014)Lin, Tao, Kalsbeek, Zeng, Gonzalez,
+  Fern{\'a}ndez-Rhodes, Graff, Koch, North, and Heiss]{lin2014genetic}
+Danyu Lin, Ran Tao, William~D. Kalsbeek, Donglin Zeng, Franklyn Gonzalez,
+  Lindsay Fern{\'a}ndez-Rhodes, Misa Graff, Gary Koch, Kari~E. North, and
+  Gerardo Heiss.
+\newblock Genetic association analysis under complex survey sampling: the
+  hispanic community health study/study of latinos.
+\newblock \emph{American Journal of Human Genetics}, 95\penalty0 (6):\penalty0
+  675--688, 2014.
+\newblock \doi{10.1016/j.ajhg.2014.11.005}.
+
+\bibitem[Si et~al.(2013)Si, Pillai, and Gelman]{si2013bayesian}
+Yajuan Si, Natesh~S. Pillai, and Andrew Gelman.
+\newblock Bayesian nonparametric weighted sampling inference.
+\newblock \emph{Bayesian Analysis}, 2013.
+\newblock \doi{10.1214/14-BA924}.
+
+\bibitem[Kunihama et~al.(2014)Kunihama, Herring, Halpern, and
+  Dunson]{kunihama2014nonparametric}
+Tsuyoshi Kunihama, Amy~H. Herring, Carolyn~Tucker Halpern, and David~B. Dunson.
+\newblock Nonparametric bayes modeling with sample survey weights.
+\newblock \emph{Statistics and Probability Letters}, 2014.
+\newblock \doi{10.1016/J.SPL.2016.02.009}.
+
+\bibitem[Savitsky and Toth(2015)]{savitskytoth2015bayesian}
+Terrance~D. Savitsky and Daniell Toth.
+\newblock Bayesian estimation under informative sampling.
+\newblock \emph{Electronic Journal of Statistics}, 2015.
+\newblock \doi{10.1214/16-EJS1153}.
+
+\bibitem[Williams and Savitsky(2018)]{williamssavitsky2018unattenuated}
+Matthew~R. Williams and Terrance~D. Savitsky.
+\newblock Bayesian estimation under informative sampling with unattenuated
+  dependence.
+\newblock \emph{Bayesian Analysis}, 2018.
+\newblock \doi{10.1214/18-BA1143}.
+
+\bibitem[Williams and Savitsky(2021)]{williamssavitsky2021uncertainty}
+Matthew~R. Williams and Terrance~D. Savitsky.
+\newblock Uncertainty estimation for pseudo-bayesian inference under complex
+  sampling.
+\newblock \emph{International Statistical Review}, 89\penalty0 (1):\penalty0
+  72--107, 2021.
+\newblock \doi{10.1111/insr.12376}.
+
+\bibitem[Hornby et~al.(2023)Hornby, Williams, Savitsky, and
+  Elkasabi]{hornby2023cssampling}
+Ryan Hornby, Matthew~R. Williams, Terrance~D. Savitsky, and Mahmoud Elkasabi.
+\newblock cssampling: An r package for bayesian models for complex survey data,
+  2023.
+
+\bibitem[Williams et~al.(2025)Williams, McGuire, and
+  Savitsky]{williamsmcguiresavitsky2025uncertainty}
+Matthew~R. Williams, Frank McGuire, and Terrance~D. Savitsky.
+\newblock Uncertainty quantification for multi-level models using the
+  survey-weighted pseudo-posterior.
+\newblock \emph{Journal of Data Science}, 2025.
+\newblock \doi{10.6339/26-jds1238}.
+
+\bibitem[Dunn et~al.(2011)Dunn, Broadhurst, Begley, Zelena, Francis-McIntyre,
+  Anderson, Brown, Knowles, Halsall, Haselden, Nicholls, Wilson, Kell, and
+  Goodacre]{dunn2011procedures}
+Warwick~B. Dunn, David Broadhurst, Paul Begley, Eva Zelena, Sue
+  Francis-McIntyre, Nadine Anderson, Marie Brown, Joshua~D. Knowles, Antony
+  Halsall, John~N. Haselden, Andrew~W. Nicholls, Ian~D. Wilson, Douglas~B.
+  Kell, and Royston Goodacre.
+\newblock Procedures for large-scale metabolic profiling of serum and plasma
+  using gas chromatography and liquid chromatography coupled to mass
+  spectrometry.
+\newblock \emph{Nature Protocols}, 2011.
+\newblock \doi{10.1038/nprot.2011.335}.
+
+\bibitem[De~Livera et~al.(2012)De~Livera, Dias, De~Souza, Rupasinghe, Pyke,
+  Tull, Roessner, McConville, and Speed]{delivera2012normalizing}
+Alysha~M. De~Livera, Daniel~A. Dias, David De~Souza, Thusitha Rupasinghe, James
+  Pyke, Dedreia Tull, Ute Roessner, Malcolm McConville, and Terence~P. Speed.
+\newblock Normalizing and integrating metabolomics data.
+\newblock \emph{Analytical Chemistry}, 2012.
+\newblock \doi{10.1021/ac302748b}.
+
+\bibitem[Wehrens et~al.(2016)Wehrens, Hageman, van Eeuwijk, Kooke, Flood,
+  Wijnker, Keurentjes, Lommen, van Eekelen, Hall, Mumm, and
+  de~Vos]{wehrens2016improved}
+Ron Wehrens, Jos~A. Hageman, Fred van Eeuwijk, Rik Kooke, Pádraic~J. Flood,
+  Erik Wijnker, Joost J.~B. Keurentjes, Arjen Lommen, Henriette D. L.~M. van
+  Eekelen, Robert~D. Hall, Roland Mumm, and Ric C.~H. de~Vos.
+\newblock Improved batch correction in untargeted ms-based metabolomics.
+\newblock \emph{Metabolomics}, 2016.
+\newblock \doi{10.1007/s11306-016-1015-8}.
+
+\bibitem[Fang et~al.(2018)Fang, Ma, Tang, Zhu, Yan, Wang, Celedón, Chen, and
+  Tseng]{fang2018bayesian}
+Zhou Fang, Tianzhou Ma, Gong Tang, Li~Zhu, Qi~Yan, Ting Wang, Juan~C. Celedón,
+  Wei Chen, and George~C. Tseng.
+\newblock Bayesian integrative model for multi-omics data with missingness.
+\newblock \emph{Bioinformatics}, 2018.
+\newblock \doi{10.1093/bioinformatics/bty775}.
+
+\bibitem[Lin et~al.(2020)Lin, Zeng, and Couper]{lin2020general}
+Danyu Lin, Donglin Zeng, and David Couper.
+\newblock A general framework for integrative analysis of incomplete
+  multi-omics data.
+\newblock \emph{Genetic Epidemiology}, 2020.
+\newblock \doi{10.1002/gepi.22328}.
+
+\bibitem[Lock and Dunson(2013)]{lock2013bayesian}
+Eric~F. Lock and David~B. Dunson.
+\newblock Bayesian consensus clustering.
+\newblock \emph{Bioinformatics}, 2013.
+\newblock \doi{10.1093/bioinformatics/btt425}.
+
+\bibitem[Burhanuddin(2026)]{burhanuddin2026integrative}
+Nurul~Afiqah Burhanuddin.
+\newblock Consensus clustering for multi-source data integration via dirichlet
+  process mixture models.
+\newblock \emph{IEEE Access}, 2026.
+\newblock \doi{10.1109/ACCESS.2026.3715972}.
+
+\bibitem[Rappoport and Shamir(2018)]{rappoport2018nemo}
+Nimrod Rappoport and Ron Shamir.
+\newblock Nemo: cancer subtyping by integration of partial multi-omic data.
+\newblock \emph{Bioinformatics}, 2018.
+\newblock \doi{10.1093/bioinformatics/btz058}.
+
+\bibitem[Voillet et~al.(2016)Voillet, Besse, Liaubet, San~Cristobal, and
+  González]{voillet2016handling}
+Valentin Voillet, Philippe Besse, Laurence Liaubet, Magali San~Cristobal, and
+  Ignacio González.
+\newblock Handling missing rows in multi-omics data integration: multiple
+  imputation in multiple factor analysis framework.
+\newblock \emph{BMC Bioinformatics}, 2016.
+\newblock \doi{10.1186/s12859-016-1273-5}.
+
+\bibitem[Breslow et~al.(2009)Breslow, Lumley, Ballantyne, Chambless, and
+  Kulich]{breslow2009improved}
+Norman~E. Breslow, Thomas Lumley, Christie~M. Ballantyne, Lloyd~E. Chambless,
+  and Michal Kulich.
+\newblock Improved horvitz-thompson estimation of model parameters from
+  two-phase stratified samples: Applications in epidemiology.
+\newblock \emph{Statistics in Biosciences}, 2009.
+\newblock \doi{10.1007/S12561-009-9001-6}.
+
+\bibitem[Chen et~al.(2021)Chen, Han, and He]{chen2021improving}
+Chixiang Chen, Peisong Han, and Fanfan He.
+\newblock Improving main analysis by borrowing information from auxiliary data.
+\newblock \emph{Statistics in Medicine}, 2021.
+\newblock \doi{10.1002/sim.9252}.
+
+\bibitem[Carry et~al.(2021)Carry, Vanderlinden, Dong, Buckner, Litkowski,
+  Vigers, Norris, and Kechris]{carry2021inverse}
+Patrick~M. Carry, Lauren~A. Vanderlinden, Fran Dong, Teresa Buckner, Elizabeth
+  Litkowski, Tim Vigers, Jill~M. Norris, and Katerina Kechris.
+\newblock Inverse probability weighting is an effective method to address
+  selection bias during the analysis of high dimensional data.
+\newblock \emph{Genetic Epidemiology}, 2021.
+\newblock \doi{10.1002/gepi.22418}.
+
+\end{thebibliography}
