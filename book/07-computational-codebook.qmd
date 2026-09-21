@@ -104,7 +104,59 @@ IntegerVector sample_allocations_cpp(
 
 ---
 
+## Data-Driven Merging & Threshold Consolidation
+
+When true component centroids and $K_0$ are unknown, the unit-level partition is estimated from the posterior similarity matrix via `mcclust::maxpear`, followed by iterative threshold consolidation:
+
+```r
+#' Consolidate Small or Close Cluster Fragments
+#' @param z Integer vector of cluster assignments (length n)
+#' @param Y Matrix of continuous biomarker manifest variables (n x P)
+#' @param w Normalized survey weights (length n, sum(w) = n)
+#' @param min_weight_frac Minimum weight fraction required for an independent cluster (default 0.02)
+#' @param min_sep Minimum Euclidean centroid distance required between distinct clusters (default 1.5)
+#' @return Consolidated cluster assignment vector with contiguous labels 1..K_final
+merge_small_close_groups <- function(z, Y, w, min_weight_frac = 0.02, min_sep = 1.5) {
+  total_w <- sum(w)
+  repeat {
+    groups <- sort(unique(z))
+    K <- length(groups)
+    if (K <= 1) break
+
+    wt <- sapply(groups, function(g) sum(w[z == g]))
+    centroids <- t(sapply(groups, function(g) {
+      idx <- which(z == g)
+      colSums(Y[idx, , drop = FALSE] * w[idx]) / sum(w[idx])
+    }))
+
+    dmat <- as.matrix(dist(centroids))
+    diag(dmat) <- Inf
+
+    # Condition 1: Merge satellite clusters with < min_weight_frac into nearest neighbor
+    smallest_idx <- which.min(wt)
+    if (wt[smallest_idx] / total_w < min_weight_frac) {
+      g_small  <- groups[smallest_idx]
+      g_target <- groups[which.min(dmat[smallest_idx, ])]
+      z[z == g_small] <- g_target
+      next
+    }
+
+    # Condition 2: Merge pairs of clusters closer than min_sep
+    min_pair <- which(dmat == min(dmat), arr.ind = TRUE)[1, ]
+    if (dmat[min_pair[1], min_pair[2]] < min_sep) {
+      z[z == groups[min_pair[2]]] <- groups[min_pair[1]]
+      next
+    }
+    break
+  }
+  match(z, sort(unique(z)))  # Relabel to contiguous 1..K_final
+}
+```
+
+---
+
 ## Analytical Profile Hessian & Score Functions
+
 
 The marginal profile score vector and observed information bread matrix are computed directly from the sub-mixture density matrix `a_mat`:
 

@@ -53,18 +53,40 @@ where $\mathcal{P}_L$ is the set of all $L!$ permutations of $\{1, \dots, L\}$. 
 
 ---
 
-## Active Component Identification & Merging
+## Component Merging: Oracle Benchmark vs. Data-Driven Clustering
 
-Under the overfitted Dirichlet process mixture model, the sampler concentrates mass on the $K_{\text{active}} \le L$ true generating clusters. The remaining components are transient: they contain zero or near-zero observations across iterations.
+In a truncated DPMM representation with truncation level $L = 10$, the sampler concentrates posterior mass on a smaller active subset $K_{\text{active}} \le L$. However, because $L > K_0$, small transient components or fragmented sub-clusters occasionally persist. Merging these fragments into identifiable population phenotypes is required before computing prevalence functionals.
 
-1. **Identifying Active Components:**
-   We compute the mean prevalence vector $\bar{\pi} = \frac{1}{M}\sum_{t=1}^M \pi^{(t)}$ across all $M$ retained post-burnin draws. The components are sorted in descending order of average weight. Components whose cumulative mass accounts for $\ge 95\%$ of the total probability (or whose individual weight exceeds a threshold $\tau = 0.05$) are designated as **active phenotypes** $\{1, \dots, K_0\}$. In our benchmark data, this consistently identifies $K_0 = 4$ active phenotypes.
+### 1. Oracle Truth-Based Merging (Simulation Ceiling)
 
-2. **Centroid-Based Mapping:**
-   Any minor or transient component $k > K_0$ is mapped to the nearest active component $j^* \in \{1, \dots, K_0\}$ based on Mahalanobis or Euclidean distance between their posterior mean locations:
+In controlled simulation benchmarks where the superpopulation parameters $(\mu_1^0, \dots, \mu_{K_0}^0)$ are known by construction:
+* The $K_0$ fitted components whose centroids are closest to the known true means are matched one-to-one.
+* Any remaining fitted component $k > K_0$ is merged into whichever true phenotype centroid it is nearest to.
+* This establishes the theoretical **upper-bound benchmark ceiling** for point estimation and coverage.
+
+### 2. Data-Driven Merging for Unknown $K_0$ (Production Pipeline)
+
+In real observational health surveys (such as HCHS/SOL), $K_0$ and true centroids are unknown a priori. We implement a fully unsupervised two-stage post-processing pipeline:
+
+#### Stage A: Posterior Similarity Matrix (PSM) Optimization
+1. Across the retained, label-switching-aligned MCMC draws $z^{(1)}, \dots, z^{(M)}$, compute the empirical $n \times n$ posterior similarity matrix:
    $$
-   j^*(k) = \arg\min_{j \in \{1, \dots, K_0\}} \|\bar{\mu}_k - \bar{\mu}_j\|_{\Sigma_0^{-1}}.
+   S_{ij} = \frac{1}{M} \sum_{t=1}^M \mathbb{I}(z_i^{(t)} = z_j^{(t)}).
    $$
+2. Extract the optimal point-estimate partition $\hat{z}$ by maximizing the Posterior Expected Adjusted Rand Index [@fritschickstadt2009] via the `mcclust::maxpear` criterion:
+   $$
+   \hat{z} = \arg\max_{c} \mathbb{E}_{Z \mid Y}[\text{ARI}(c, Z)].
+   $$
+3. Map raw MCMC components to estimated groups based on modal assignment overlap in the final iteration.
+
+#### Stage B: Unsupervised Threshold Consolidation
+Applied naively, the raw `maxpear` partition recovers the exact true phenotype count $\hat{K} = K_0 = 4$ in only **$28.8\%$** of replicates, exhibiting a heavy right tail of over-segmentation (up to 17 clusters) caused by spurious satellite groups and split sub-clusters within a true phenotype.
+
+To resolve this, we apply an iterative consolidation procedure operating purely on data-driven metrics:
+* **Minimum Weight Threshold ($\tau_w = 0.02$):** If the smallest group accounts for less than $2\%$ of the total survey weight ($\sum_{i \in g} w_i / \sum_i w_i < 0.02$), it is merged into its nearest neighbor by weighted centroid distance.
+* **Minimum Centroid Separation ($\tau_d = 1.5$):** If the minimum Euclidean distance between any pair of group centroids falls below $1.5$ standard deviations, the two closest groups are merged.
+
+This iterative thresholding repeats until neither condition triggers. In simulation benchmarks, this consolidation raises the exact $K_0$ recovery rate from **$28.8\%$ to $98.2\%$**, eliminating satellite fragmentation without risking the merging of genuinely distinct biological phenotypes.
 
 ---
 

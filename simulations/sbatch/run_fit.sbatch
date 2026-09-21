@@ -12,6 +12,10 @@
 # the TRUE superpopulation Gaussian densities, isolating whether the
 # residual coverage gap is attributable to unpropagated (mu_k,Sigma_k)
 # posterior uncertainty.
+# UNKNOWN_K0 (0/1, default 0) replaces the truth-based raw-component merge
+# with a data-driven (posterior-similarity-matrix) merge, for testing
+# whether the method still recovers K0 and calibration without ground
+# truth -- as would be required on real data.
 #   sbatch --array=1-N --export=ALL,CLUSTER_C=0.3 \
 #     --output=logs/fit_c0.3_%A_%a.out \
 #     --error=logs/fit_c0.3_%A_%a.err \
@@ -36,6 +40,10 @@ CLUSTER_C="${CLUSTER_C:-0.3}"
 N_PSU="${N_PSU:-4}"
 export APPLY_CORR="${APPLY_CORR:-0}"
 export ORACLE="${ORACLE:-0}"
+export UNKNOWN_K0="${UNKNOWN_K0:-0}"
+export MERGE_THRESHOLD="${MERGE_THRESHOLD:-0}"
+export MERGE_MIN_WEIGHT="${MERGE_MIN_WEIGHT:-0.02}"
+export MERGE_MIN_SEP="${MERGE_MIN_SEP:-1.5}"
 mkdir -p logs results .rcpp_cache
 
 module load r/4.5.0

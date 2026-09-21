@@ -126,6 +126,68 @@ if (nzchar(ARM_TAG_ENV)) {
 APPLY_CORR_STR <- Sys.getenv("APPLY_CORR", unset = "0")
 APPLY_CORR <- APPLY_CORR_STR == "1"
 
+# UNKNOWN_K0 toggle: replace the truth-based raw-component-to-phenotype
+# merge (matching fitted centroids directly to the KNOWN MU0_LIST) with a
+# data-driven merge -- a posterior-similarity-matrix point estimate of the
+# unit-level partition (Fritsch & Ickstadt 2009's improved-Dahl criterion,
+# via mcclust::maxpear), computed with NO access to ground truth. The
+# resulting estimated groups are THEN aligned to the K0 known phenotypes by
+# centroid distance, but that alignment is used only to SCORE the method
+# against known truth (as one would compute e.g. an ARI in any clustering
+# simulation study), not by the estimation step itself. Tests whether an
+# unsupervised merge rule -- the only option on real data, where K0 is
+# unknown -- recovers K0 and preserves calibration.
+UNKNOWN_K0_STR <- Sys.getenv("UNKNOWN_K0", unset = "0")
+UNKNOWN_K0 <- UNKNOWN_K0_STR == "1"
+
+# MERGE_THRESHOLD toggle (only relevant when UNKNOWN_K0=1): post-process
+# the data-driven maxpear partition to suppress spurious over-splits,
+# still with NO access to ground truth. Iteratively (a) merges the
+# smallest estimated group into its nearest neighbor if its total survey
+# weight is below MERGE_MIN_WEIGHT (fraction of total weight), else (b)
+# merges the two closest group centroids if their distance is below
+# MERGE_MIN_SEP, until neither condition triggers. MERGE_MIN_SEP's default
+# (1.5) is well below the true inter-phenotype separation in this DGP
+# (MU0_LIST centroids are >= 4.12 apart) but comparable to a few times the
+# per-component SD (SIGMA0_LIST diagonals ~0.5-0.7), targeting spurious
+# within-phenotype sub-splits specifically.
+MERGE_THRESHOLD_STR <- Sys.getenv("MERGE_THRESHOLD", unset = "0")
+MERGE_THRESHOLD <- MERGE_THRESHOLD_STR == "1"
+MERGE_MIN_WEIGHT <- as.numeric(Sys.getenv("MERGE_MIN_WEIGHT", unset = "0.02"))
+MERGE_MIN_SEP    <- as.numeric(Sys.getenv("MERGE_MIN_SEP", unset = "1.5"))
+
+merge_small_close_groups <- function(z, Y, w, min_weight_frac, min_sep) {
+  total_w <- sum(w)
+  repeat {
+    groups <- sort(unique(z))
+    K <- length(groups)
+    if (K <= 1) break
+    wt  <- sapply(groups, function(g) sum(w[z == g]))
+    cen <- t(sapply(groups, function(g) {
+      idx <- which(z == g)
+      colSums(Y[idx, , drop = FALSE] * w[idx]) / sum(w[idx])
+    }))
+    dmat <- as.matrix(dist(cen))
+    diag(dmat) <- Inf
+
+    smallest_idx <- which.min(wt)
+    if (wt[smallest_idx] / total_w < min_weight_frac) {
+      g_small  <- groups[smallest_idx]
+      g_target <- groups[which.min(dmat[smallest_idx, ])]
+      z[z == g_small] <- g_target
+      next
+    }
+
+    min_pair <- which(dmat == min(dmat), arr.ind = TRUE)[1, ]
+    if (dmat[min_pair[1], min_pair[2]] < min_sep) {
+      z[z == groups[min_pair[2]]] <- groups[min_pair[1]]
+      next
+    }
+    break
+  }
+  match(z, sort(unique(z)))  # relabel to contiguous 1..K_final
+}
+
 # ORACLE toggle: replace the raw-mixture reconstruction of a_ik (plug-in,
 # from the FITTED components) with the TRUE superpopulation Gaussian
 # densities (MU0_LIST/SIGMA0_LIST) in relabel_and_summarize's a_mat. Tests
@@ -135,16 +197,25 @@ APPLY_CORR <- APPLY_CORR_STR == "1"
 ORACLE_STR <- Sys.getenv("ORACLE", unset = "0")
 ORACLE <- ORACLE_STR == "1"
 
-# RESULT_TAG: like ARM_TAG but also carries a _corr1/_oracle1 suffix when
-# APPLY_CORR/ORACLE deviate from their defaults (0), so different fits of
-# the SAME samples land in distinctly-named results/posteriors rather than
-# one overwriting/skipping (via resumability) the other. Respects an
-# explicit ARM_TAG override exactly (no auto-suffix), matching that
-# override's intent.
+# N_MCMC_ITER/N_BURNIN configurable via env vars to test longer chains
+# (higher effective sample size for Sigma_naive) against the default.
+N_MCMC_ITER <- as.integer(Sys.getenv("N_MCMC_ITER", unset = "1500"))
+N_BURNIN    <- as.integer(Sys.getenv("N_BURNIN", unset = "500"))
+LONGCHAIN   <- N_MCMC_ITER != 1500L || N_BURNIN != 500L
+
+# RESULT_TAG: like ARM_TAG but also carries a _corr1/_oracle1/_longchain
+# suffix when APPLY_CORR/ORACLE/chain-length deviate from their defaults,
+# so different fits of the SAME samples land in distinctly-named
+# results/posteriors rather than one overwriting/skipping (via
+# resumability) the other. Respects an explicit ARM_TAG override exactly
+# (no auto-suffix), matching that override's intent.
 RESULT_TAG <- ARM_TAG
 if (!nzchar(ARM_TAG_ENV)) {
   if (APPLY_CORR) RESULT_TAG <- paste0(RESULT_TAG, "_corr1")
   if (ORACLE) RESULT_TAG <- paste0(RESULT_TAG, "_oracle1")
+  if (LONGCHAIN) RESULT_TAG <- paste0(RESULT_TAG, "_longchain")
+  if (UNKNOWN_K0) RESULT_TAG <- paste0(RESULT_TAG, "_datadriven")
+  if (UNKNOWN_K0 && MERGE_THRESHOLD) RESULT_TAG <- paste0(RESULT_TAG, "_thresh")
 }
 
 # POP_PATH/SAMPLES_DIR env overrides let a one-off arm point at any
@@ -169,8 +240,6 @@ SIGMA0_LIST <- pop$SIGMA0_LIST
 TRUE_PREVALENCE <- pop$true_prevalence
 
 L_TRUNC       <- 10
-N_MCMC_ITER   <- 1500
-N_BURNIN      <- 500
 SIGMA_FLOOR   <- 0.05
 ALPHA0_SPARSE <- 1
 
@@ -298,36 +367,95 @@ relabel_and_summarize <- function(fit, w, Y, K_active_min, coverage = 0.99, orac
     if (i == m) z_relabeled_last <- z_relab
   }
 
-  centroids <- matrix(NA_real_, K_active, ncol(Y))
-  for (k in seq_len(K_active)) {
-    idx <- which(z_relabeled_last == k)
-    if (length(idx) > 0) {
-      centroids[k, ] <- colSums(Y[idx, , drop = FALSE] * w[idx]) / sum(w[idx])
-    } else {
-      centroids[k, ] <- rep(1e6, ncol(Y))
-    }
-  }
+  if (UNKNOWN_K0) {
+    # DATA-DRIVEN MERGE (no ground truth): point-estimate the unit-level
+    # partition from the posterior similarity matrix across the retained,
+    # already label-switching-corrected draws (z_valid), via Fritsch &
+    # Ickstadt (2009)'s improved-Dahl criterion (mcclust::maxpear).
+    psm <- mcclust::comp.psm(z_valid)
+    mp <- mcclust::maxpear(psm)
+    z_hat <- as.integer(mp$cl)
 
-  cost <- matrix(0, K_active, K0)
-  for (k in seq_len(K_active)) {
+    if (MERGE_THRESHOLD) {
+      z_hat <- merge_small_close_groups(z_hat, Y, w, MERGE_MIN_WEIGHT, MERGE_MIN_SEP)
+    }
+    K_hat <- length(unique(z_hat))
+
+    # Raw component -> estimated group, by modal overlap in the last
+    # iteration (no truth used).
+    raw_to_group <- sapply(seq_len(K_active), function(k) {
+      idx <- which(z_relabeled_last == k)
+      if (length(idx) == 0) return(1L)
+      tab <- table(z_hat[idx])
+      as.integer(names(tab)[which.max(tab)])
+    })
+
+    # Estimated-group centroids (no truth used).
+    group_centroids <- matrix(NA_real_, K_hat, ncol(Y))
+    for (g in seq_len(K_hat)) {
+      idx <- which(z_hat == g)
+      if (length(idx) > 0) {
+        group_centroids[g, ] <- colSums(Y[idx, , drop = FALSE] * w[idx]) / sum(w[idx])
+      } else {
+        group_centroids[g, ] <- rep(1e6, ncol(Y))
+      }
+    }
+
+    # ALIGNMENT TO TRUTH FOR VALIDATION SCORING ONLY -- exactly like
+    # computing an ARI against known labels in any clustering simulation
+    # study; not used by the merge decision above, which never saw MU0_LIST.
+    cost <- matrix(0, K_hat, K0)
+    for (g in seq_len(K_hat)) {
+      for (j in seq_len(K0)) cost[g, j] <- sqrt(sum((group_centroids[g, ] - MU0_LIST[[j]])^2))
+    }
+    assigned_groups <- integer(K0)
+    avail_groups <- seq_len(K_hat)
     for (j in seq_len(K0)) {
-      cost[k, j] <- sqrt(sum((centroids[k, ] - MU0_LIST[[j]])^2))
+      if (length(avail_groups) == 0) avail_groups <- seq_len(K_hat)  # K_hat < K0: allow reuse
+      best_g <- avail_groups[which.min(cost[avail_groups, j])]
+      assigned_groups[j] <- best_g
+      avail_groups <- setdiff(avail_groups, best_g)
     }
-  }
+    group_to_phenotype <- integer(K_hat)
+    group_to_phenotype[assigned_groups] <- seq_len(K0)
+    unassigned_groups <- setdiff(seq_len(K_hat), assigned_groups)
+    if (length(unassigned_groups) > 0) {
+      group_to_phenotype[unassigned_groups] <-
+        apply(cost[unassigned_groups, , drop = FALSE], 1, which.min)
+    }
+    component_to_phenotype <- group_to_phenotype[raw_to_group]
+  } else {
+    centroids <- matrix(NA_real_, K_active, ncol(Y))
+    for (k in seq_len(K_active)) {
+      idx <- which(z_relabeled_last == k)
+      if (length(idx) > 0) {
+        centroids[k, ] <- colSums(Y[idx, , drop = FALSE] * w[idx]) / sum(w[idx])
+      } else {
+        centroids[k, ] <- rep(1e6, ncol(Y))
+      }
+    }
 
-  assigned_fitted <- integer(K0)
-  avail_fitted <- seq_len(K_active)
-  for (j in seq_len(K0)) {
-    best_k <- avail_fitted[which.min(cost[avail_fitted, j])]
-    assigned_fitted[j] <- best_k
-    avail_fitted <- setdiff(avail_fitted, best_k)
-  }
+    cost <- matrix(0, K_active, K0)
+    for (k in seq_len(K_active)) {
+      for (j in seq_len(K0)) {
+        cost[k, j] <- sqrt(sum((centroids[k, ] - MU0_LIST[[j]])^2))
+      }
+    }
 
-  component_to_phenotype <- integer(K_active)
-  component_to_phenotype[assigned_fitted] <- seq_len(K0)
-  if (length(avail_fitted) > 0) {
-    component_to_phenotype[avail_fitted] <-
-      apply(cost[avail_fitted, , drop = FALSE], 1, which.min)
+    assigned_fitted <- integer(K0)
+    avail_fitted <- seq_len(K_active)
+    for (j in seq_len(K0)) {
+      best_k <- avail_fitted[which.min(cost[avail_fitted, j])]
+      assigned_fitted[j] <- best_k
+      avail_fitted <- setdiff(avail_fitted, best_k)
+    }
+
+    component_to_phenotype <- integer(K_active)
+    component_to_phenotype[assigned_fitted] <- seq_len(K0)
+    if (length(avail_fitted) > 0) {
+      component_to_phenotype[avail_fitted] <-
+        apply(cost[avail_fitted, , drop = FALSE], 1, which.min)
+    }
   }
 
   prev_draws_aligned <- matrix(0, m, K0)
@@ -373,7 +501,8 @@ relabel_and_summarize <- function(fit, w, Y, K_active_min, coverage = 0.99, orac
   }
 
   list(prev_draws = prev_draws_aligned, z_point_estimate = as.integer(z_point_aligned),
-       K_active = K0, K_raw_active = K_active, a_mat = a_mat)
+       K_active = K0, K_raw_active = K_active, a_mat = a_mat,
+       K_hat_estimated = if (UNKNOWN_K0) K_hat else NA_integer_)
 }
 
 # RAW-MIXTURE Godambe sandwich correction: H and the (jackknife) score
@@ -479,6 +608,7 @@ run_one_sample <- function(sample_id) {
 
   list(pi_hat = sw$pi_hat, adjusted_draws = sw$adjusted_draws,
        K_active = rl$K_active, K_raw_active = rl$K_raw_active,
+       K_hat_estimated = rl$K_hat_estimated,
        true_prevalence = TRUE_PREVALENCE,
        M_psu = sw$M_psu, H_strata = sw$H_strata, df_design = sw$df_design,
        c_corr = sw$c_corr, t_crit = sw$t_crit,

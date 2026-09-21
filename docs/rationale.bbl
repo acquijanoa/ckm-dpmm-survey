@@ -1,4 +1,4 @@
-\begin{thebibliography}{72}
+\begin{thebibliography}{73}
 \providecommand{\natexlab}[1]{#1}
 \providecommand{\url}[1]{\texttt{#1}}
 \expandafter\ifx\csname urlstyle\endcsname\relax
@@ -664,5 +664,12 @@ J.~N.~K. Rao and C.~F.~J. Wu.
 \newblock \emph{Journal of the American Statistical Association}, 83\penalty0
   (401), 1988.
 \newblock \doi{10.1080/01621459.1988.10478610}.
+
+\bibitem[Fritsch and Ickstadt(2009)]{fritschickstadt2009}
+Arno Fritsch and Katja Ickstadt.
+\newblock Improved criteria for clustering based on the posterior similarity
+  matrix.
+\newblock \emph{Bayesian Analysis}, 4\penalty0 (2), 2009.
+\newblock \doi{10.1214/09-BA414}.
 
 \end{thebibliography}
