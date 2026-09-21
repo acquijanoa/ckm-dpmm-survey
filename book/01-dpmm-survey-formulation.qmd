@@ -1,0 +1,128 @@
+# Survey-Weighted DPMM Formulation {#sec-formulation}
+
+## Introduction
+
+In modern epidemiological and health survey research, identifying latent disease subtypes or phenotypic profiles is essential for understanding population heterogeneity. Data arising from national health surveys—such as the National Health and Nutrition Examination Survey (NHANES) or the Hispanic Community Health Study / Study of Latinos (HCHS/SOL)—are collected using complex, multistage sampling designs involving:
+
+1. **Stratification** ($h = 1, \dots, H$) to guarantee representation across geographic or demographic sectors.
+2. **Clustering** within Primary Sampling Units (PSUs, $i = 1, \dots, N_h$) such as census tracts, counties, or block groups.
+3. **Unequal Selection Probabilities** leading to design sampling weights $w_i = 1 / \pi_i$, reflecting the number of population elements represented by each sampled subject.
+
+Standard Bayesian Nonparametric (BNP) models, such as Dirichlet Process Mixture Models (DPMMs), assume that observations are independent and identically distributed (i.i.d.). When applied naively to complex survey data, standard DPMMs suffer from severe biases: unequal selection probabilities distort mixture proportions, while unmodeled cluster correlation leads to falsely deflated posterior variances and drastic undercoverage.
+
+This chapter develops the **Survey-Weighted Dirichlet Process Gaussian Mixture Model (DPMM)**, establishing a coherent Bayesian framework that accounts for unequal selection probabilities without destabilizing cluster discovery.
+
+---
+
+## Overfitted Finite Mixture Formulation
+
+The Dirichlet Process prior $\mathcal{DP}(\alpha_0, G_0)$ can be constructively defined via the stick-breaking process [@sethuraman1994]:
+$$
+G = \sum_{k=1}^\infty \pi_k \delta_{\theta_k}, \quad \pi_k = v_k \prod_{l < k}(1 - v_l), \quad v_k \sim \text{Beta}(1, \alpha_0), \quad \theta_k \sim G_0.
+$$
+
+For computational tractability and efficient Gibbs sampling, we implement the overfitted finite mixture approximation introduced by @rousseau2011asymptotic and @ishwaran2001gibbs. We fix a conservative upper bound on the number of mixture components, $L = 10$, and place a symmetric sparse Dirichlet prior on the mixture weights:
+$$
+\pi = (\pi_1, \dots, \pi_L)^\top \sim \text{Dirichlet}\left(\frac{\alpha_0}{L}, \dots, \frac{\alpha_0}{L}\right).
+$$
+
+### Asymptotic Emptying of Superfluous Components
+
+@rousseau2011asymptotic proved a fundamental property of overfitted mixtures: when the true number of mixture components is $K_0 < L$, placing a Dirichlet prior $\text{Dir}(\gamma, \dots, \gamma)$ with $\gamma < d/2$ (where $d$ is the number of parameters per component) guarantees that the posterior probability of redundant components converges to zero as $n \to \infty$. Specifically, the MCMC sampler automatically empties redundant components, concentrating all mass on the $K_0$ true generating phenotypes.
+
+In our continuous multivariate setting with $P$ continuous biomarkers, each component has parameter vector $\theta_k = (\mu_k, \Sigma_k)$, containing $P + P(P+1)/2$ free parameters. With $\alpha_0 = 1.0$ and $L = 10$, the Dirichlet hyperparameter is:
+$$
+\gamma = \frac{\alpha_0}{L} = 0.1 \ll \frac{d}{2},
+$$
+satisfying the Rousseau–Mengersen condition and preventing over-clustering.
+
+---
+
+## Conjugate Normal-Inverse-Wishart Base Measure
+
+Let $Y_i \in \mathbb{R}^P$ denote the $P$-dimensional continuous biomarker vector for sampled individual $i = 1, \dots, n$. Conditional on latent class allocation $z_i \in \{1, \dots, L\}$, observations follow a multivariate Gaussian distribution:
+$$
+Y_i \mid z_i = k, \mu_k, \Sigma_k \sim \mathcal{N}_P(\mu_k, \Sigma_k).
+$$
+
+We specify conditionally conjugate Normal-Inverse-Wishart ($\mathcal{NIW}$) priors for the component-specific parameters $(\mu_k, \Sigma_k)$:
+$$
+\Sigma_k \sim \mathcal{W}^{-1}(\nu_0, \Lambda_0), \quad \mu_k \mid \Sigma_k \sim \mathcal{N}_P\left(m_0, \frac{1}{\kappa_0} \Sigma_k\right),
+$$
+where:
+* $m_0 = \bar{Y} = \frac{1}{n}\sum_{i=1}^n Y_i$ is the empirical sample mean.
+* $\kappa_0 = 0.01$ provides a weakly informative prior on the component mean locations.
+* $\nu_0 = P + 2$ is the minimum integer degrees of freedom ensuring the prior expectation $\mathbb{E}[\Sigma_k] = \Lambda_0 / (\nu_0 - P - 1) = \Lambda_0$ exists.
+* $\Lambda_0 = \text{diag}(\mathbb{V}\text{ar}(Y_1), \dots, \mathbb{V}\text{ar}(Y_P))$ matches the empirical marginal variances of the biomarkers.
+
+---
+
+## Incorporating Survey Weights: The Pseudolikelihood Principle
+
+In complex survey sampling, unit $i$ is sampled with design weight $w_i = 1 / \pi_i$. To obtain design-consistent estimators of finite-population parameters, we adopt the pseudolikelihood framework pioneered by @pfeffermann1993role and adapted to Bayesian models by @savitsky2016bayesian.
+
+The finite-population log-likelihood for the complete data $(Y, z)$ across population $\mathcal{U}$ of size $N$ is:
+$$
+\ell_{\mathcal{U}}(\pi, \theta) = \sum_{i \in \mathcal{U}} \left[ \log \pi_{z_i} + \log \phi(Y_i \mid \mu_{z_i}, \Sigma_{z_i}) \right].
+$$
+Because we observe only a complex sample $s \subset \mathcal{U}$, the Horvitz–Thompson plug-in estimator for $\ell_{\mathcal{U}}$ is the **sample pseudolikelihood**:
+$$
+\ell_{\text{pseudo}}(\pi, \theta) = \sum_{i \in s} w_i \left[ \log \pi_{z_i} + \log \phi(Y_i \mid \mu_{z_i}, \Sigma_{z_i}) \right].
+$$
+
+### The Unweighted Allocation / Weighted Update Rule
+
+A naive implementation of Bayesian survey weighting raises each unit's likelihood contribution to the power $w_i$ during latent class allocation:
+$$
+\Pr(z_i = k \mid Y_i, \dots) \propto \pi_k^{w_i} \left[ \phi(Y_i \mid \mu_k, \Sigma_k) \right]^{w_i} \quad \text{(NAIVE / UNSTABLE)}.
+$$
+This naive exponentiation causes severe pathological behavior:
+1. For units with large weights ($w_i > 5$), exponentiating the Gaussian density $\phi(Y_i)^{w_i}$ produces extreme numerical underflow or artificial precision spikes, forcing units into isolated, singleton clusters.
+2. It fragments homogeneous phenotypic clusters into multiple redundant artifact components, violating the Rousseau–Mengersen condition.
+
+To avoid this, we implement the **unweighted-allocation with survey-weighted aggregate updates** strategy [@savitsky2016bayesian; @wu2023latent]:
+
+1. **Individual Allocation Step (Unweighted):**
+   The conditional latent allocation probability for individual $i$ depends strictly on the generative mixture model for that individual:
+   $$
+   p_{ik} = \Pr(z_i = k \mid Y_i, \pi, \mu, \Sigma) = \frac{\pi_k \phi(Y_i \mid \mu_k, \Sigma_k)}{\sum_{l=1}^L \pi_l \phi(Y_i \mid \mu_l, \Sigma_l)}.
+   $$
+   Allocations $z_i \sim \text{Categorical}(p_{i1}, \dots, p_{iL})$ remain unweighted, preserving cluster integrity and local biological independence.
+
+2. **Mixture Weight Update (Survey-Weighted):**
+   Survey weights enter during the aggregation of component membership across the sample. The weighted effective count for component $k$ is:
+   $$
+   n_k^{(w)} = \sum_{i=1}^n w_i \mathbb{I}(z_i = k).
+   $$
+   Normalizing design weights such that $\sum_{i=1}^n w_i = n$, the full conditional posterior for the population mixture weights $\pi$ is:
+   $$
+   \pi \mid z, w \sim \text{Dirichlet}\left( \frac{\alpha_0}{L} + n_1^{(w)}, \dots, \frac{\alpha_0}{L} + n_L^{(w)} \right).
+   $$
+
+3. **Component Parameter Updates (Survey-Weighted Sufficient Statistics):**
+   The component mean and covariance parameters $(\mu_k, \Sigma_k)$ are updated using survey-weighted sufficient statistics:
+   $$
+   \bar{Y}_k^{(w)} = \frac{1}{n_k^{(w)}} \sum_{i: z_i = k} w_i Y_i,
+   $$
+   $$
+   S_k^{(w)} = \sum_{i: z_i = k} w_i (Y_i - \bar{Y}_k^{(w)})(Y_i - \bar{Y}_k^{(w)})^\top.
+   $$
+   Conditional on $z$ and $w$, the updated conjugate parameters are:
+   $$
+   \kappa_k^{(w)} = \kappa_0 + n_k^{(w)}, \quad \nu_k^{(w)} = \nu_0 + n_k^{(w)},
+   $$
+   $$
+   m_k^{(w)} = \frac{\kappa_0 m_0 + n_k^{(w)} \bar{Y}_k^{(w)}}{\kappa_k^{(w)}},
+   $$
+   $$
+   \Lambda_k^{(w)} = \Lambda_0 + S_k^{(w)} + \frac{\kappa_0 n_k^{(w)}}{\kappa_k^{(w)}} (\bar{Y}_k^{(w)} - m_0)(\bar{Y}_k^{(w)} - m_0)^\top.
+   $$
+   We then draw:
+   $$
+   \Sigma_k \mid Y, z, w \sim \mathcal{W}^{-1}\left(\nu_k^{(w)}, \Lambda_k^{(w)}\right),
+   $$
+   $$
+   \mu_k \mid \Sigma_k, Y, z, w \sim \mathcal{N}_P\left(m_k^{(w)}, \frac{1}{\kappa_k^{(w)}} \Sigma_k\right).
+   $$
+
+This formulation guarantees that the posterior estimates of $\pi$ and $(\mu_k, \Sigma_k)$ consistently target the finite-population parameters while avoiding numerical instability and artificial cluster splitting.

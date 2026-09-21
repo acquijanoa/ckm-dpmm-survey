@@ -1,0 +1,131 @@
+# Stratified Cluster Jackknife Variance {#sec-jackknife}
+
+## Complex Survey Sampling Architecture
+
+Health surveys do not draw simple random samples from the population. Instead, they operate under multistage stratified clustered designs:
+
+* **Strata ($h = 1, \dots, H$):** The population is partitioned into $H$ mutually exclusive and exhaustive geographic or demographic strata. Sampling is conducted independently within each stratum.
+* **Primary Sampling Units (PSUs, $c = 1, \dots, n_h$):** Within stratum $h$, a sample of $n_h \ge 2$ clusters (e.g., counties, census tracts, or street blocks) is selected, often with Probability Proportional to Size (PPS).
+* **Elements ($j = 1, \dots, m_{hc}$):** Within sampled PSU $(h, c)$, a sample of $m_{hc}$ ultimate individuals is interviewed.
+* **Total Sampled Clusters:** $M = \sum_{h=1}^H n_h$.
+
+Because individuals living within the same cluster share environmental, socioeconomic, and healthcare access characteristics, their biomarker values and latent phenotypic risks exhibit intra-cluster correlation. The design effect ($\text{DEFF}$) reflects this variance inflation:
+$$
+\text{DEFF} = 1 + (\bar{m} - 1)\rho_{\text{ICC}},
+$$
+where $\bar{m}$ is the average cluster size and $\rho_{\text{ICC}}$ is the intraclass correlation coefficient.
+
+---
+
+## Why Jackknife Over Bootstrap for Clustered Surveys
+
+To construct the Godambe information sandwich matrix:
+$$
+\Sigma_{\text{sandwich}} = H_{\hat\pi}^{-1} J H_{\hat\pi}^{-1},
+$$
+the central challenge is accurately estimating the "meat" matrix $J = \mathbb{V}\text{ar}_p(S(\hat\pi))$, representing the design-based sampling variance of the score vector under the complex survey design.
+
+While the survey bootstrap is widely used, it possesses distinct limitations in stratified clustered settings:
+1. **Monte Carlo Resampling Noise:** Bootstrap estimates depend on random pseudo-replicates, introducing simulation noise that can vary between runs unless astronomical numbers of resamples ($B > 2{,}000$) are drawn.
+2. **Resampling Degeneracy in Small Strata:** When $n_h = 2$ or $n_h = 4$, drawing $n_h - 1$ clusters with replacement frequently omits entire clusters or duplicates others, causing instability in high-dimensional matrices.
+3. **Exact Determinism:** The **Stratified Delete-PSU Jackknife** [@kott2001approximating; @wolter2007introduction] is strictly deterministic, non-random, and design-unbiased for smooth estimating equations. It requires exactly $M$ replicate evaluations, perfectly mirroring the finite-population sampling variance.
+
+---
+
+## The Stratified Delete-PSU Jackknife Algorithm
+
+The stratified delete-PSU jackknife proceeds by systematically omitting one Primary Sampling Unit at a time and reweighting the remaining PSUs in that stratum.
+
+### Step 1: Replicate Weights
+
+For each stratum $h \in \{1, \dots, H\}$ and each sampled PSU $c \in \{1, \dots, n_h\}$, we define replicate $(h, c)$. The replicate design weight $w_i^{(hc)}$ for unit $i$ residing in stratum $h'$ and PSU $c'$ is constructed as follows:
+$$
+w_i^{(hc)} = \begin{cases}
+w_i & \text{if } h' \ne h \quad \text{(unaffected strata)}, \\
+0 & \text{if } h' = h \text{ and } c' = c \quad \text{(the deleted PSU)}, \\
+\frac{n_h}{n_h - 1} w_i & \text{if } h' = h \text{ and } c' \ne c \quad \text{(reweighted remaining PSUs)}.
+\end{cases}
+$$
+Notice that $\sum_{i \in \text{sample}} w_i^{(hc)} = \sum_{i \in \text{sample}} w_i = n$, preserving total sample size in every replicate.
+
+### Step 2: Replicate Score Perturbations
+
+Using the analytical profile score derived in @sec-score-hessian, we evaluate the replicate score vector at the fixed pseudo-MLE $\hat{\pi}$:
+$$
+S_{(hc)} = \sum_{i=1}^n w_i^{(hc)} \frac{a_i - a_{i, K_0}}{m_i(\hat{\pi})} \in \mathbb{R}^{K_0 - 1}.
+$$
+
+Because $w_i^{(hc)} - w_i$ is non-zero only for observations in stratum $h$, the replicate score deviation simplifies to an intra-stratum calculation:
+$$
+S_{(hc)} - S = \sum_{i \in \text{stratum } h} (w_i^{(hc)} - w_i) \frac{a_i - a_{i, K_0}}{m_i(\hat{\pi})}.
+$$
+Since $S(\hat\pi) = \mathbf{0}$, this deviation represents the exact contribution of PSU $(h, c)$ to survey sampling variability.
+
+### Step 3: Stratified Jackknife Meat Matrix
+
+Within each stratum $h$, we compute the stratum average replicate score:
+$$
+\bar{S}_h = \frac{1}{n_h} \sum_{c=1}^{n_h} S_{(hc)}.
+$$
+The Stratified Delete-PSU Jackknife Meat Matrix is:
+$$
+J_{\text{jack}} = \sum_{h=1}^H \frac{n_h - 1}{n_h} \sum_{c=1}^{n_h} \left( S_{(hc)} - \bar{S}_h \right) \left( S_{(hc)} - \bar{S}_h \right)^\top.
+$$
+
+---
+
+## Finite-Sample Design Degrees-of-Freedom Calibration
+
+In complex survey sampling, the effective degrees of freedom are determined by the number of clusters and strata, rather than the number of individuals $n$:
+$$
+\text{df}_{\text{design}} = M - H = \sum_{h=1}^H (n_h - 1).
+$$
+
+For instance, in a design with $H = 50$ strata and $n_h = 4$ PSUs per stratum:
+$$
+M = 50 \times 4 = 200, \quad \text{df}_{\text{design}} = 200 - 50 = 150.
+$$
+
+When $\text{df}_{\text{design}}$ is finite, the sample covariance matrix estimator exhibits slight negative bias. To ensure exact finite-sample calibration, we apply the design degrees-of-freedom scaling factor:
+$$
+c_{\text{corr}} = \frac{M}{M - H} = \frac{M}{\text{df}_{\text{design}}}.
+$$
+The calibrated meat matrix is:
+$$
+\tilde{J}_{\text{jack}} = c_{\text{corr}} \cdot J_{\text{jack}}.
+$$
+
+---
+
+## The Godambe Sandwich Covariance Matrix
+
+Combining the analytical profile Hessian $H_{\hat\pi}$ from @sec-score-hessian and the calibrated jackknife meat matrix $\tilde{J}_{\text{jack}}$, the Godambe information sandwich covariance matrix on the $(K_0 - 1)$-dimensional unconstrained parameter space is:
+$$
+\Sigma_{\text{sandwich}} = H_{\hat\pi}^{-1} \tilde{J}_{\text{jack}} H_{\hat\pi}^{-1}.
+$$
+
+### Projecting to the Full Simplex
+
+To obtain the full $K_0 \times K_0$ covariance matrix for all $K_0$ phenotype prevalences (including the reference category $\pi_{K_0}$), we define the linear contrast projection matrix $C \in \mathbb{R}^{K_0 \times (K_0 - 1)}$:
+$$
+C = \begin{pmatrix}
+I_{K_0 - 1} \\
+-\mathbf{1}_{K_0 - 1}^\top
+\end{pmatrix} = \begin{pmatrix}
+1 & 0 & \dots & 0 \\
+0 & 1 & \dots & 0 \\
+\vdots & \vdots & \ddots & \vdots \\
+0 & 0 & \dots & 1 \\
+-1 & -1 & \dots & -1
+\end{pmatrix}.
+$$
+
+The full sandwich covariance matrix is:
+$$
+\Sigma_{\text{sandwich}}^{\text{full}} = C \Sigma_{\text{sandwich}} C^\top \in \mathbb{R}^{K_0 \times K_0}.
+$$
+This full covariance matrix satisfies the simplex constraint:
+$$
+\mathbf{1}_{K_0}^\top \Sigma_{\text{sandwich}}^{\text{full}} \mathbf{1}_{K_0} = 0,
+$$
+ensuring that the sum of sampling variances and covariances perfectly respects $\sum_{k=1}^{K_0} \pi_k = 1$.

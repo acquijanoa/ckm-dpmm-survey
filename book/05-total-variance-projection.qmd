@@ -1,0 +1,109 @@
+# Total-Variance Recombination & Affine Projection {#sec-total-variance}
+
+## The Decomposition of Survey Mixture Uncertainty
+
+In Bayesian survey inference, uncertainty surrounding the finite-population prevalence vector $\pi = (\pi_1, \dots, \pi_{K_0})^\top$ arises from two fundamentally distinct, orthogonal mechanisms:
+
+1. **Design Sampling & Classification Variability:** The uncertainty due to observing a finite complex survey sample $s \subset \mathcal{U}$ rather than the entire census population, governed by the stratified clustered sampling design and cluster allocation uncertainty. This is captured by the Godambe sandwich covariance:
+   $$
+   \Sigma_{\text{sandwich}} = H_{\hat\pi}^{-1} \tilde{J}_{\text{jack}} H_{\hat\pi}^{-1}.
+   $$
+2. **Posterior Mixing & Parameter Uncertainty:** The Bayesian parameter uncertainty in the component biomarker locations and shapes $(\mu_k, \Sigma_k)$ across MCMC iterations within the Gibbs chain. This is captured by the empirical MCMC covariance matrix:
+   $$
+   \Sigma_{\text{naive}} = \frac{1}{M-1} \sum_{m=1}^M \left(\pi^{(m)} - \bar{\pi}\right) \left(\pi^{(m)} - \bar{\pi}\right)^\top.
+   $$
+
+### The Law of Total Variance
+
+By the Law of Total Variance, the unconditional variance of $\pi$ under the combined superpopulation and design distributions decomposes as:
+$$
+\mathbb{V}\text{ar}(\pi \mid Y, \text{design}) = \mathbb{E}_{\theta \mid Y} \left[ \mathbb{V}\text{ar}_{\text{design}}(\pi \mid Y, \theta) \right] + \mathbb{V}\text{ar}_{\theta \mid Y} \left[ \mathbb{E}_{\text{design}}(\pi \mid Y, \theta) \right].
+$$
+
+* The first term, $\mathbb{E}_\theta[\mathbb{V}\text{ar}_{\text{design}}(\pi \mid Y, \theta)]$, is estimated by $\Sigma_{\text{sandwich}}$, which conditions on the posterior mean parameters $(\bar{\mu}_k, \bar{\Sigma}_k)$ and measures sampling variation under the complex design.
+* The second term, $\mathbb{V}\text{ar}_\theta[\mathbb{E}_{\text{design}}(\pi \mid Y, \theta)]$, reflects how the estimated prevalence shifts as $\theta = (\mu, \Sigma)$ moves throughout the posterior distribution, estimated by $\Sigma_{\text{naive}}$.
+
+Treating these two components as additive yields the **Total Corrected Covariance Matrix**:
+$$
+\Sigma_{\text{corrected}} = \Sigma_{\text{sandwich}} + \Sigma_{\text{naive}}.
+$$
+
+Crucially, because we maintain **Zero-Waste Full-Chain Retention** (@sec-mcmc), $\Sigma_{\text{naive}}$ is computed from all $M = 1{,}000$ draws, preserving true MCMC mixing without artificial truncation.
+
+---
+
+## Affine Cholesky Transformation
+
+While analytical covariance matrices allow computing Wald confidence intervals, Bayesian practice requires draws from the calibrated posterior distribution to enable arbitrary non-linear downstream inferences, credible intervals, and probabilistic risk profiling.
+
+To produce calibrated posterior samples, we apply the affine transformation framework of @williams2021bayesian.
+
+### Derivation of the Transformation
+
+Let $\pi_{-K_0}^{(m)} = (\pi_1^{(m)}, \dots, \pi_{K_0-1}^{(m)})^\top$ denote the unconstrained $(K_0 - 1)$-dimensional prevalence vector for MCMC draw $m \in \{1, \dots, M\}$, and let $\bar{\pi}_{-K_0} = \frac{1}{M} \sum_{m=1}^M \pi_{-K_0}^{(m)}$ be the posterior mean.
+
+The empirical covariance matrix of these raw draws on the unconstrained space is $\Sigma_{\text{naive}} \in \mathbb{R}^{(K_0-1) \times (K_0-1)}$, while the desired target covariance is $\Sigma_{\text{corrected}} \in \mathbb{R}^{(K_0-1) \times (K_0-1)}$.
+
+We seek an affine transformation matrix $A \in \mathbb{R}^{(K_0-1) \times (K_0-1)}$:
+$$
+\pi_{-K_0}^{(m), a} = \left(\pi_{-K_0}^{(m)} - \bar{\pi}_{-K_0}\right) A + \bar{\pi}_{-K_0},
+$$
+such that:
+1. **Unbiased Center:** The transformed sample mean is identically preserved:
+   $$
+   \frac{1}{M} \sum_{m=1}^M \pi_{-K_0}^{(m), a} = \bar{\pi}_{-K_0}.
+   $$
+2. **Target Covariance Matching:** The empirical covariance of the transformed draws matches $\Sigma_{\text{corrected}}$:
+   $$
+   \mathbb{C}\text{ov}\left(\pi_{-K_0}^{(m), a}\right) = A^\top \Sigma_{\text{naive}} A = \Sigma_{\text{corrected}}.
+   $$
+
+### The Cholesky Decomposition Solution
+
+Compute the upper triangular Cholesky factorizations:
+$$
+R_1^\top R_1 = \Sigma_{\text{corrected}}, \quad R_2^\top R_2 = \Sigma_{\text{naive}},
+$$
+where $R_1, R_2 \in \mathbb{R}^{(K_0-1) \times (K_0-1)}$ are upper triangular matrices.
+
+Setting:
+$$
+A = R_2^{-1} R_1,
+$$
+we verify:
+$$
+A^\top \Sigma_{\text{naive}} A = (R_2^{-1} R_1)^\top (R_2^\top R_2) (R_2^{-1} R_1) = R_1^\top (R_2^{-\top} R_2^\top) (R_2 R_2^{-1}) R_1 = R_1^\top I R_1 = \Sigma_{\text{corrected}}.
+$$
+
+The affine transformation rule for draw $m$ is therefore:
+$$
+\pi_{-K_0}^{(m), a} = \left(\pi_{-K_0}^{(m)} - \bar{\pi}_{-K_0}\right) R_2^{-1} R_1 + \bar{\pi}_{-K_0}.
+$$
+
+### Reconstructing the Full Vector
+
+The reference category prevalence $\pi_{K_0}^{(m), a}$ is reconstructed by simplex closure:
+$$
+\pi_{K_0}^{(m), a} = 1 - \sum_{k=1}^{K_0-1} \pi_k^{(m), a}.
+$$
+
+If numerical rotation pushes any draw slightly outside the probability simplex ($\pi_k^{(m), a} < 0$ or $> 1$), we apply the standard simplex Euclidean projection [@wang2013projection], guaranteeing that all posterior draws remain valid probability distributions.
+
+---
+
+## Calibrated Posterior Intervals
+
+With the affine-projected posterior draws $\left\{\pi^{(1), a}, \dots, \pi^{(M), a}\right\}$ in hand, calibrated 95% posterior credible intervals can be extracted directly via empirical quantiles:
+$$
+\text{CrI}_{0.95}(\pi_k) = \left[ q_{0.025}\left(\{\pi_k^{(m), a}\}\right), \; q_{0.975}\left(\{\pi_k^{(m), a}\}\right) \right].
+$$
+
+Equivalently, studentized Wald-type confidence intervals can be constructed using the corrected standard errors and the design degrees of freedom $\nu = M - H$:
+$$
+\text{SE}_{\text{corrected}, k} = \sqrt{\Sigma_{\text{corrected}, kk}^{\text{full}}},
+$$
+$$
+\text{CI}_{0.95}(\pi_k) = \left[ \bar{\pi}_k - t_{\nu, 0.975} \cdot \text{SE}_{\text{corrected}, k}, \; \bar{\pi}_k + t_{\nu, 0.975} \cdot \text{SE}_{\text{corrected}, k} \right].
+$$
+
+Because the affine rotation aligns the empirical second moment of the MCMC draws with $\Sigma_{\text{corrected}}$, the Bayesian quantile intervals and design-based studentized intervals coincide, unifying Bayesian nonparametric inference with classical complex survey theory.

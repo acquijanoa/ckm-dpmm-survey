@@ -1,4 +1,4 @@
-\begin{thebibliography}{64}
+\begin{thebibliography}{72}
 \providecommand{\natexlab}[1]{#1}
 \providecommand{\url}[1]{\texttt{#1}}
 \expandafter\ifx\csname urlstyle\endcsname\relax
@@ -597,5 +597,72 @@ Patrick~M. Carry, Lauren~A. Vanderlinden, Fran Dong, Teresa Buckner, Elizabeth
   selection bias during the analysis of high dimensional data.
 \newblock \emph{Genetic Epidemiology}, 2021.
 \newblock \doi{10.1002/gepi.22418}.
+
+\bibitem[Rousseau and Mengersen(2011)]{rousseau2011asymptotic}
+Judith Rousseau and Kerrie Mengersen.
+\newblock Asymptotic behaviour of the posterior distribution in overfitted
+  mixture models.
+\newblock \emph{Journal of the Royal Statistical Society Series B: Statistical
+  Methodology}, 73\penalty0 (5):\penalty0 689--710, 2011.
+\newblock \doi{10.1111/j.1467-9868.2011.00781.x}.
+
+\bibitem[Stephenson et~al.(2024)Stephenson, Wu, and
+  Dominici]{stephenson2024wolca}
+Briana J.~K. Stephenson, Stephanie~M. Wu, and Francesca Dominici.
+\newblock Identifying dietary consumption patterns from survey data: A
+  {B}ayesian nonparametric latent class model.
+\newblock \emph{Journal of the Royal Statistical Society Series A: Statistics
+  in Society}, 187\penalty0 (2):\penalty0 496--512, 2024.
+\newblock \doi{10.1093/jrsssa/qnad135}.
+
+\bibitem[Wu et~al.(2024)Wu, Williams, Savitsky, and Stephenson]{wu2024swolca}
+Stephanie~M. Wu, Matthew~R. Williams, Terrance~D. Savitsky, and Briana J.~K.
+  Stephenson.
+\newblock Derivation of outcome-dependent dietary patterns for low-income women
+  obtained from survey data using a supervised weighted overfitted latent class
+  analysis.
+\newblock \emph{Biometrics}, 80\penalty0 (4):\penalty0 ujae122, 2024.
+\newblock \doi{10.1093/biomtc/ujae122}.
+
+\bibitem[Zeng et~al.(2020)Zeng, Miller, and Duan]{zeng2020consistent}
+Cheng Zeng, Jeffrey~W. Miller, and Leo~L. Duan.
+\newblock Consistent model-based clustering using the quasi-{B}ernoulli
+  stick-breaking process.
+\newblock \emph{Journal of Machine Learning Research}, 21\penalty0
+  (89):\penalty0 1--32, 2020.
+
+\bibitem[Stephenson et~al.(2020)Stephenson, Sotres-Alvarez, Siega-Riz,
+  Mossavar-Rahmani, Daviglus, Van~Horn, Herring, and
+  Cai]{stephenson2020rpchchssol}
+Briana~J. Stephenson, Daniela Sotres-Alvarez, Anna-Maria Siega-Riz, Yasmin
+  Mossavar-Rahmani, Martha~L. Daviglus, Linda Van~Horn, Amy~H. Herring, and
+  Jianwen Cai.
+\newblock Empirically derived dietary patterns using robust profile clustering
+  in the {H}ispanic {C}ommunity {H}ealth {S}tudy/{S}tudy of {L}atinos.
+\newblock \emph{The Journal of Nutrition}, 150\penalty0 (10):\penalty0
+  2825--2834, 2020.
+\newblock \doi{10.1093/jn/nxaa208}.
+
+\bibitem[Wu et~al.(2026)Wu, Williams, Savitsky, and Stephenson]{wu2026baysc}
+Stephanie~M. Wu, Matthew~R. Williams, Terrance~D. Savitsky, and Briana J.~K.
+  Stephenson.
+\newblock baysc: An {R} package for {B}ayesian survey clustering.
+\newblock \emph{Journal of Open Source Software}, 11\penalty0 (119):\penalty0
+  8382, 2026.
+\newblock \doi{10.21105/joss.08382}.
+
+\bibitem[Stephens(2000)]{stephens2000dealing}
+Matthew Stephens.
+\newblock Dealing with label switching in mixture models.
+\newblock \emph{Journal of the Royal Statistical Society: Series B},
+  62\penalty0 (4), 2000.
+\newblock \doi{10.1111/1467-9868.00265}.
+
+\bibitem[Rao and Wu(1988)]{raowu1988resampling}
+J.~N.~K. Rao and C.~F.~J. Wu.
+\newblock Resampling inference with complex survey data.
+\newblock \emph{Journal of the American Statistical Association}, 83\penalty0
+  (401), 1988.
+\newblock \doi{10.1080/01621459.1988.10478610}.
 
 \end{thebibliography}

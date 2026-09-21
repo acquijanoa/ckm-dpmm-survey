@@ -1,0 +1,92 @@
+# MCMC Sampling & Zero-Waste Relabeling {#sec-mcmc}
+
+## Blocked Gibbs Sampler Implementation
+
+The survey-weighted DPMM derived in @sec-formulation is estimated via a blocked Gibbs sampler. Because the continuous biomarker likelihood is conjugate Normal-Inverse-Wishart, all full conditional distributions can be sampled directly without Metropolis–Hastings rejection steps.
+
+To achieve production-grade computational speed, the core iterative sampling steps are implemented in C++ using `RcppArmadillo`. 
+
+### The Sampling Cycle
+
+For each MCMC iteration $t = 1, \dots, T_{\text{total}}$:
+
+1. **Latent Class Allocations ($z_i$):**
+   For each observation $i \in \{1, \dots, n\}$, compute the unweighted log-responsibilities across all $L = 10$ components:
+   $$
+   \log \tilde{p}_{ik} = \log \pi_k - \frac{1}{2} \log |\Sigma_k| - \frac{1}{2} (Y_i - \mu_k)^\top \Sigma_k^{-1} (Y_i - \mu_k).
+   $$
+   Normalize using the log-sum-exp trick to avoid numerical underflow:
+   $$
+   p_{ik} = \frac{\exp(\log \tilde{p}_{ik} - c_i)}{\sum_{l=1}^L \exp(\log \tilde{p}_{il} - c_i)}, \quad c_i = \max_{l} \log \tilde{p}_{il}.
+   $$
+   Draw $z_i^{(t)} \sim \text{Categorical}(p_{i1}, \dots, p_{iL})$.
+
+2. **Survey-Weighted Component Aggregation:**
+   Calculate the survey-weighted sample sizes:
+   $$
+   n_k^{(w)} = \sum_{i=1}^n w_i \mathbb{I}(z_i^{(t)} = k).
+   $$
+   Draw updated population mixture weights:
+   $$
+   \pi^{(t)} \sim \text{Dirichlet}\left(\frac{\alpha_0}{L} + n_1^{(w)}, \dots, \frac{\alpha_0}{L} + n_L^{(w)}\right).
+   $$
+
+3. **Survey-Weighted Sufficient Statistics & Component Updating:**
+   For each component $k = 1, \dots, L$:
+   * If $n_k^{(w)} > 0$, compute weighted mean $\bar{Y}_k^{(w)}$ and weighted sum-of-squares $S_k^{(w)}$.
+   * Update the NIW hyperparameters $(\kappa_k^{(w)}, \nu_k^{(w)}, m_k^{(w)}, \Lambda_k^{(w)})$.
+   * Draw $\Sigma_k^{(t)} \sim \mathcal{W}^{-1}(\nu_k^{(w)}, \Lambda_k^{(w)})$ using the Bartlett decomposition of Wishart matrices.
+   * Draw $\mu_k^{(t)} \sim \mathcal{N}_P\left(m_k^{(w)}, \frac{1}{\kappa_k^{(w)}} \Sigma_k^{(t)}\right)$.
+   * If a component is completely empty ($n_k^{(w)} = 0$), sample $(\mu_k^{(t)}, \Sigma_k^{(t)})$ directly from the unweighted base prior $\mathcal{NIW}(m_0, \kappa_0, \nu_0, \Lambda_0)$.
+
+---
+
+## Post-MCMC Label Switching Alignment
+
+Mixture models are invariant under permutations of the component indices $\{1, \dots, L\}$, a phenomenon known as **label switching** [@stephens2000dealing; @fruhwirth2006finite]. Because the prior distribution $\text{Dir}(\alpha_0/L, \dots, \alpha_0/L)$ is symmetric, component labels may permute across iterations during long MCMC runs.
+
+We align labels using the relabeling algorithm of @stephens2000dealing via the `label.switching` R package. Stephens' algorithm minimizes the Kullback–Leibler divergence between the iteration-specific classification matrices $P^{(t)} = (p_{ik}^{(t)})_{n \times L}$ and an average classification matrix $Q = (q_{ik})_{n \times L}$:
+$$
+\hat{\nu}^{(t)} = \arg\min_{\nu \in \mathcal{P}_L} \sum_{i=1}^n \sum_{k=1}^L p_{ik}^{(t)} \log\left(\frac{p_{ik}^{(t)}}{q_{i, \nu(k)}}\right),
+$$
+where $\mathcal{P}_L$ is the set of all $L!$ permutations of $\{1, \dots, L\}$. The algorithm alternates between finding optimal permutations $\hat{\nu}^{(t)}$ for each MCMC draw and updating $Q$ until convergence.
+
+---
+
+## Active Component Identification & Merging
+
+Under the overfitted Dirichlet process mixture model, the sampler concentrates mass on the $K_{\text{active}} \le L$ true generating clusters. The remaining components are transient: they contain zero or near-zero observations across iterations.
+
+1. **Identifying Active Components:**
+   We compute the mean prevalence vector $\bar{\pi} = \frac{1}{M}\sum_{t=1}^M \pi^{(t)}$ across all $M$ retained post-burnin draws. The components are sorted in descending order of average weight. Components whose cumulative mass accounts for $\ge 95\%$ of the total probability (or whose individual weight exceeds a threshold $\tau = 0.05$) are designated as **active phenotypes** $\{1, \dots, K_0\}$. In our benchmark data, this consistently identifies $K_0 = 4$ active phenotypes.
+
+2. **Centroid-Based Mapping:**
+   Any minor or transient component $k > K_0$ is mapped to the nearest active component $j^* \in \{1, \dots, K_0\}$ based on Mahalanobis or Euclidean distance between their posterior mean locations:
+   $$
+   j^*(k) = \arg\min_{j \in \{1, \dots, K_0\}} \|\bar{\mu}_k - \bar{\mu}_j\|_{\Sigma_0^{-1}}.
+   $$
+
+---
+
+## The Zero-Waste Full-Chain Retention Rule
+
+A subtle but critical methodological challenge arises when mapping transient components back to active phenotypes. 
+
+In conventional mixture modeling implementations, practitioners often apply a strict filtering rule: any MCMC iteration where one or more individuals are assigned to an unmapped or transient component is discarded as "invalid." In complex survey data, where sample sizes are moderate ($n = 1{,}000$) and sampling weights vary, this naive filtering rule has disastrous consequences:
+
+* **Severe Draw Attrition:** On average, 50% to 80% of post-burnin MCMC draws are discarded (reducing a nominal 1,000-draw chain to as few as 160 draws).
+* **Artificial Posterior Tail Truncation:** Discarding iterations with transient cluster assignments systematically strips away the empirical spread in the tails of $\pi$.
+* **Deflated Posterior Covariance:** The empirical MCMC covariance matrix $\Sigma_{\text{naive}} = \mathbb{C}\text{ov}(\pi^{(1)}, \dots, \pi^{(M)})$ becomes artificially compressed, leading to persistent undercoverage.
+
+### The Zero-Waste Solution
+
+The active method implements **Zero-Waste Full-Chain Draw Retention**:
+
+1. **100% Draw Preservation:** Every single post-burnin iteration $t \in \{1, \dots, M\}$ is retained ($M = 1{,}000$ draws). Zero draws are discarded.
+2. **Deterministic Mapping of Transient Allocations:** For each draw $t$, if an individual $i$ was assigned to transient component $k > K_0$, their allocation is mapped deterministically to phenotype $j^*(k)$:
+   $$
+   z_i^{\text{merged},(t)} = \begin{cases} z_i^{(t)} & \text{if } z_i^{(t)} \le K_0, \\ j^*(z_i^{(t)}) & \text{if } z_i^{(t)} > K_0. \end{cases}
+   $$
+3. **Full Posterior Variance Recovery:** The resulting prevalence draws $\pi_k^{(t)} = \frac{1}{n} \sum_{i=1}^n w_i \mathbb{I}(z_i^{\text{merged},(t)} = k)$ reflect the complete, unpruned MCMC exploration of the parameter space.
+
+By retaining all 1,000 draws, the effective sample size is preserved, the empirical covariance $\Sigma_{\text{naive}}$ accurately captures posterior mixing variability, and nominal coverage is successfully achieved.

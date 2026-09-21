@@ -1,0 +1,296 @@
+# Computational Codebook & Reference Implementation {#sec-codebook}
+
+## Software Architecture & Dependencies
+
+This chapter provides a complete, production-grade computational reference implementation of the Survey-Weighted Dirichlet Process Mixture Model with Stratified Cluster Jackknife Variance Estimation and Affine Projection.
+
+The pipeline combines high-performance C++ (`RcppArmadillo`) for the core MCMC iterations with modular R functions for survey calibration and affine projection.
+
+### Setting the R Library Environment
+
+On high-performance computing clusters (such as Longleaf), custom or user-installed packages should be prioritized by prepending the user library to `.libPaths()`:
+
+```r
+# Prepend personal R library if present
+personal_lib <- "/nas/longleaf/home/aquijano/R/x86_64-pc-linux-gnu-library/4.5"
+if (dir.exists(personal_lib) && !(personal_lib %in% .libPaths())) {
+  .libPaths(c(personal_lib, .libPaths()))
+}
+
+suppressPackageStartupMessages({
+  library(MASS)
+  library(mvtnorm)
+  library(label.switching)
+  library(coda)
+  library(Rcpp)
+  library(RcppArmadillo)
+})
+```
+
+---
+
+## High-Performance C++ Sampling Kernel (`dpmm_helpers.cpp`)
+
+The computationally demanding steps of the Gibbs sampler—computing multivariate Gaussian quadratic forms, evaluating log-sum-exp responsibilities, and updating Wishart matrices—are executed in C++ via `RcppArmadillo`.
+
+```cpp
+#include <RcppArmadillo.h>
+// [[Rcpp::depends(RcppArmadillo)]]
+
+using namespace Rcpp;
+using namespace arma;
+
+// [[Rcpp::export]]
+IntegerVector sample_allocations_cpp(
+    const mat& Y,
+    const vec& pi,
+    const mat& mu,
+    const field<mat>& Sigma,
+    int n,
+    int L,
+    int P
+) {
+  IntegerVector z(n);
+  mat log_p(n, L);
+  
+  // Pre-invert and pre-determinant for each component
+  field<mat> Sigma_inv(L);
+  vec log_det_val(L);
+  for (int k = 0; k < L; ++k) {
+    mat S = Sigma(k);
+    Sigma_inv(k) = inv_sympd(S);
+    double val, sign;
+    log_det(val, sign, S);
+    log_det_val(k) = val;
+  }
+  
+  // Compute unweighted responsibilities
+  for (int k = 0; k < L; ++k) {
+    vec m = mu.col(k);
+    mat S_inv = Sigma_inv(k);
+    double ldet = log_det_val(k);
+    double lpi = std::log(std::max(pi(k), 1e-12));
+    
+    for (int i = 0; i < n; ++i) {
+      rowvec diff = Y.row(i) - m.t();
+      double qf = as_scalar(diff * S_inv * diff.t());
+      log_p(i, k) = lpi - 0.5 * ldet - 0.5 * qf;
+    }
+  }
+  
+  // Normalized Categorical draws
+  for (int i = 0; i < n; ++i) {
+    rowvec lp = log_p.row(i);
+    double max_lp = max(lp);
+    rowvec probs = exp(lp - max_lp);
+    probs = probs / sum(probs);
+    
+    double u = R::runif(0.0, 1.0);
+    double cum = 0.0;
+    int chosen = L - 1;
+    for (int k = 0; k < L; ++k) {
+      cum += probs(k);
+      if (u <= cum) {
+        chosen = k;
+        break;
+      }
+    }
+    z[i] = chosen + 1; // 1-indexed for R
+  }
+  
+  return z;
+}
+```
+
+---
+
+## Analytical Profile Hessian & Score Functions
+
+The marginal profile score vector and observed information bread matrix are computed directly from the sub-mixture density matrix `a_mat`:
+
+```r
+#' Compute Analytical Profile Hessian and Sample Score
+#' @param a_mat Matrix of sub-mixture densities (n x K0)
+#' @param pi_bar Current prevalence vector (length K0)
+#' @param weights Survey weights (length n, normalized to sum(w) = n)
+#' @return List containing H_hat ((K0-1) x (K0-1)) and score_mat (n x (K0-1))
+compute_profile_hessian_and_scores <- function(a_mat, pi_bar, weights) {
+  n <- nrow(a_mat)
+  K0 <- ncol(a_mat)
+  K_free <- K0 - 1
+  
+  # Marginal mixture density per unit
+  m_i <- as.vector(a_mat %*% pi_bar)
+  m_i <- pmax(m_i, 1e-12) # Protect against underflow
+  
+  # Contrasts against reference category K0
+  diff_mat <- a_mat[, 1:K_free, drop = FALSE] - a_mat[, K0]
+  
+  # Individual score contributions: w_i * (a_ik - a_iK0) / m_i
+  score_mat <- (weights / m_i) * diff_mat
+  
+  # Analytical profile Hessian: H_hat = sum_i w_i * diff_i * diff_i' / m_i^2
+  w_scaled <- weights / (m_i^2)
+  H_hat <- matrix(0, nrow = K_free, ncol = K_free)
+  for (i in seq_len(n)) {
+    d_i <- diff_mat[i, ]
+    H_hat <- H_hat + w_scaled[i] * tcrossprod(d_i)
+  }
+  
+  list(H_hat = H_hat, score_mat = score_mat)
+}
+```
+
+---
+
+## Stratified Delete-PSU Jackknife Implementation
+
+The deterministic delete-PSU jackknife routine calculates the meat matrix $J_{\text{jack}}$ across all strata and clusters:
+
+```r
+#' Stratified Delete-PSU Jackknife for Marginal Score
+#' @param a_mat Matrix of sub-mixture densities (n x K0)
+#' @param pi_bar Current prevalence vector (length K0)
+#' @param weights Survey design weights
+#' @param strata Stratum indicator vector
+#' @param clusters Cluster (PSU) indicator vector
+#' @return The calibrated meat matrix J_jack ((K0-1) x (K0-1))
+compute_jackknife_meat <- function(a_mat, pi_bar, weights, strata, clusters) {
+  K0 <- ncol(a_mat)
+  K_free <- K0 - 1
+  m_i <- as.vector(a_mat %*% pi_bar)
+  diff_mat <- a_mat[, 1:K_free, drop = FALSE] - a_mat[, K0]
+  
+  unique_strata <- unique(strata)
+  H <- length(unique_strata)
+  M_total <- length(unique(interaction(strata, clusters)))
+  df_design <- M_total - H
+  c_corr <- M_total / df_design
+  
+  J_raw <- matrix(0, nrow = K_free, ncol = K_free)
+  
+  for (h in unique_strata) {
+    stratum_mask <- (strata == h)
+    psu_in_stratum <- unique(clusters[stratum_mask])
+    n_h <- length(psu_in_stratum)
+    
+    if (n_h <= 1) next
+    
+    # Calculate replicate scores S_(hc)
+    rep_scores <- matrix(0, nrow = n_h, ncol = K_free)
+    for (c_idx in seq_along(psu_in_stratum)) {
+      c_val <- psu_in_stratum[c_idx]
+      w_rep <- weights
+      
+      # Re-weighting: omitted PSU gets 0, remaining PSUs get n_h / (n_h - 1)
+      omit_mask <- stratum_mask & (clusters == c_val)
+      keep_mask <- stratum_mask & (clusters != c_val)
+      
+      w_rep[omit_mask] <- 0
+      w_rep[keep_mask] <- weights[keep_mask] * (n_h / (n_h - 1))
+      
+      # Score contribution
+      rep_scores[c_idx, ] <- colSums((w_rep / m_i) * diff_mat)
+    }
+    
+    # Stratum center
+    mean_s_h <- colMeans(rep_scores)
+    
+    # Add stratum variance contribution
+    diff_s_h <- sweep(rep_scores, 2, mean_s_h, "-")
+    J_h <- ((n_h - 1) / n_h) * crossprod(diff_s_h)
+    J_raw <- J_raw + J_h
+  }
+  
+  # Return design degrees-of-freedom scaled meat matrix
+  c_corr * J_raw
+}
+```
+
+---
+
+## Total-Variance Recombination & Affine Projection
+
+This function executes the total-variance recombination and performs the affine Cholesky transformation on MCMC draws:
+
+```r
+#' Total-Variance Recombination and Affine Projection
+#' @param draws_free MCMC draws matrix (M x (K0-1))
+#' @param H_hat Profile Hessian matrix ((K0-1) x (K0-1))
+#' @param J_jack Jackknife meat matrix ((K0-1) x (K0-1))
+#' @return Affine-rotated draws on full simplex (M x K0)
+affine_project_draws <- function(draws_free, H_hat, J_jack) {
+  M <- nrow(draws_free)
+  K_free <- ncol(draws_free)
+  K0 <- K_free + 1
+  
+  # 1. Godambe Sandwich Covariance
+  H_inv <- solve(H_hat)
+  Sigma_sandwich <- H_inv %*% J_jack %*% H_inv
+  
+  # 2. Naive Empirical MCMC Covariance
+  Sigma_naive <- cov(draws_free)
+  
+  # 3. Total-Variance Recombination
+  Sigma_corrected <- Sigma_sandwich + Sigma_naive
+  
+  # 4. Cholesky Factorizations
+  R1 <- chol(Sigma_corrected) # R1' R1 = Sigma_corrected
+  R2 <- chol(Sigma_naive)     # R2' R2 = Sigma_naive
+  
+  # Affine rotation operator A = R2^{-1} R1
+  A <- solve(R2, R1)
+  
+  # 5. Transform Draws
+  mean_free <- colMeans(draws_free)
+  centered <- sweep(draws_free, 2, mean_free, "-")
+  rotated_free <- centered %*% A
+  rotated_free <- sweep(rotated_free, 2, mean_free, "+")
+  
+  # 6. Reconstruct Full Simplex
+  full_draws <- matrix(0, nrow = M, ncol = K0)
+  full_draws[, 1:K_free] <- rotated_free
+  full_draws[, K0] <- 1 - rowSums(rotated_free)
+  
+  # Simplex boundary protection (Euclidean projection if needed)
+  for (m in seq_len(M)) {
+    if (any(full_draws[m, ] < 0) || any(full_draws[m, ] > 1)) {
+      full_draws[m, ] <- pmax(full_draws[m, ], 0)
+      full_draws[m, ] <- full_draws[m, ] / sum(full_draws[m, ])
+    }
+  }
+  
+  full_draws
+}
+```
+
+---
+
+## Execution Guide
+
+### SLURM Batch Execution on HPC Clusters
+
+To execute the model estimation on a SLURM cluster:
+
+```bash
+#!/bin/bash
+#SBATCH --job-name=dpmm_survey
+#SBATCH --output=logs/dpmm_%A_%a.out
+#SBATCH --error=logs/dpmm_%A_%a.err
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=4G
+#SBATCH --time=02:00:00
+#SBATCH --array=1-1000%50
+
+module load r/4.5.0
+
+# Set user R library
+export R_LIBS_USER="/nas/longleaf/home/aquijano/R/x86_64-pc-linux-gnu-library/4.5"
+
+# Run replicate
+Rscript simulations/src/R/dpmm_fit.R --replicate=${SLURM_ARRAY_TASK_ID}
+```
+
+This completes the fully self-contained reference implementation.

@@ -1,0 +1,107 @@
+# Marginal Pseudolikelihood Score & Hessian {#sec-score-hessian}
+
+## Motivation: Hard vs. Marginal Responsibilities
+
+In latent class analysis and finite mixture modeling, calculating the Godambe information sandwich matrix requires specifying an estimating function. A common convention in the early literature was to condition on the hard classification assignments:
+$$
+\hat{z}_i = \arg\max_k \Pr(z_i = k \mid Y_i).
+$$
+However, conditioning on hard assignments treats latent cluster memberships as observed, fixed data. This introduces severe underestimation of uncertainty because it completely ignores:
+1. Classification overlap between adjacent phenotypes.
+2. Posterior uncertainty in component boundaries.
+3. Sub-cluster fragmentation within phenotypes.
+
+To obtain an exact, asymptotically valid Godambe information matrix, we construct the score equations and profile Hessian from the **marginal mixture pseudolikelihood** [@williams2021bayesian; @wu2023latent], integrating over the latent indicator variables $z_i$.
+
+---
+
+## Raw Sub-Mixture Density Formulation
+
+Let $L$ be the truncated number of fitted components in the DPMM, and let $\{1, \dots, K_0\}$ denote the set of active phenotypes after Stephens relabeling. Each raw component $l \in \{1, \dots, L\}$ is mapped to an active phenotype $k \in \{1, \dots, K_0\}$ via the mapping index $\mathcal{M}(l) \in \{1, \dots, K_0\}$. 
+
+Let $C_k = \{l \in \{1, \dots, L\} : \mathcal{M}(l) = k\}$ denote the set of all raw components mapped to phenotype $k$. Instead of collapsing these components into a single Gaussian (which falsely implies unimodality and overstates precision), we reconstruct the true **sub-mixture density** for each phenotype $k$:
+$$
+a_{ik} = \frac{1}{\sum_{l \in C_k} \bar{\pi}_l^{\text{raw}}} \sum_{l \in C_k} \bar{\pi}_l^{\text{raw}} \phi(Y_i \mid \bar{\mu}_l, \bar{\Sigma}_l),
+$$
+where:
+* $\bar{\mu}_l$ and $\bar{\Sigma}_l$ are the posterior mean parameters for raw component $l$.
+* $\bar{\pi}_l^{\text{raw}}$ is the posterior mean weight of raw component $l$.
+* $\phi(Y_i \mid \mu, \Sigma)$ is the multivariate Gaussian probability density function.
+
+By evaluating $a_{ik}$ across the full unmerged set of raw components, $a_{ik}$ faithfully captures within-phenotype heterogeneity, skewness, and multi-modality.
+
+---
+
+## Marginal Pseudolikelihood and Profile Score
+
+The marginal likelihood of observation $i$ given phenotype prevalence vector $\pi = (\pi_1, \dots, \pi_{K_0})^\top$ is:
+$$
+m_i(\pi) = \sum_{k=1}^{K_0} \pi_k a_{ik}.
+$$
+Because the prevalences must lie on the simplex ($\sum_{k=1}^{K_0} \pi_k = 1$), there are only $K_0 - 1$ free parameters. Choosing phenotype $K_0$ as the reference category, we substitute:
+$$
+\pi_{K_0} = 1 - \sum_{k=1}^{K_0-1} \pi_k.
+$$
+The marginal mixture density can be written linearly in the free parameter vector $\pi_{-K_0} = (\pi_1, \dots, \pi_{K_0-1})^\top$:
+$$
+m_i(\pi) = \sum_{k=1}^{K_0-1} \pi_k a_{ik} + \left(1 - \sum_{k=1}^{K_0-1} \pi_k\right) a_{i, K_0} = a_{i, K_0} + \sum_{k=1}^{K_0-1} \pi_k (a_{ik} - a_{i, K_0}).
+$$
+
+The finite-population marginal log-pseudolikelihood across the complex survey sample is:
+$$
+\ell_{\text{pseudo}}(\pi) = \sum_{i=1}^n w_i \log m_i(\pi).
+$$
+
+### Individual Score Vectors
+
+Differentiating $\ell_{\text{pseudo}}(\pi)$ with respect to $\pi_k$ for $k \in \{1, \dots, K_0 - 1\}$:
+$$
+\frac{\partial m_i(\pi)}{\partial \pi_k} = a_{ik} - a_{i, K_0}.
+$$
+Applying the chain rule, the individual score contribution $s_i(\pi) \in \mathbb{R}^{K_0 - 1}$ is:
+$$
+s_i(\pi) = \nabla_{\pi} \left[ w_i \log m_i(\pi) \right] = w_i \frac{a_i - a_{i, K_0}}{m_i(\pi)},
+$$
+where $a_i = (a_{i1}, \dots, a_{i, K_0-1})^\top$ and $a_{i, K_0} = a_{i, K_0} \mathbf{1}_{K_0-1}$.
+
+The total sample score vector is:
+$$
+S(\pi) = \sum_{i=1}^n s_i(\pi) = \sum_{i=1}^n w_i \frac{a_i - a_{i, K_0}}{m_i(\pi)} = \mathbf{0}_{K_0-1}.
+$$
+At the pseudo-MLE $\hat{\pi}$, the sample score vector vanishes: $S(\hat{\pi}) = \mathbf{0}$.
+
+---
+
+## Analytical Profile Hessian (The Bread Matrix)
+
+The bread matrix $H_{\hat\pi}$ of the Godambe information sandwich is defined as the negative second derivative (the observed Fisher information matrix) of the marginal pseudolikelihood:
+$$
+H_{\hat\pi} = - \nabla^2_{\pi} \ell_{\text{pseudo}}(\hat{\pi}).
+$$
+
+Let us differentiate the score vector $s_i(\pi)$ a second time. For indices $k, l \in \{1, \dots, K_0 - 1\}$:
+$$
+\frac{\partial}{\partial \pi_l} \left[ \frac{\partial \ell_{\text{pseudo}}(\pi)}{\partial \pi_k} \right] = \frac{\partial}{\partial \pi_l} \sum_{i=1}^n w_i \frac{a_{ik} - a_{i, K_0}}{m_i(\pi)}.
+$$
+Since the numerator $(a_{ik} - a_{i, K_0})$ is independent of $\pi$, we have:
+$$
+\frac{\partial}{\partial \pi_l} \left( \frac{1}{m_i(\pi)} \right) = - \frac{1}{m_i(\pi)^2} \frac{\partial m_i(\pi)}{\partial \pi_l} = - \frac{a_{il} - a_{i, K_0}}{m_i(\pi)^2}.
+$$
+Therefore:
+$$
+\frac{\partial^2 \ell_{\text{pseudo}}(\pi)}{\partial \pi_k \partial \pi_l} = - \sum_{i=1}^n w_i \frac{(a_{ik} - a_{i, K_0})(a_{il} - a_{i, K_0})}{m_i(\pi)^2}.
+$$
+
+In matrix form, the negative Hessian evaluated at $\hat{\pi}$ is:
+$$
+H_{\hat\pi} = \sum_{i=1}^n w_i \frac{(a_i - a_{i, K_0})(a_i - a_{i, K_0})^\top}{m_i(\hat{\pi})^2}.
+$$
+
+### Mathematical Properties of the Profile Hessian
+
+1. **Symmetry & Positive Definiteness:** Since each outer product $(a_i - a_{i, K_0})(a_i - a_{i, K_0})^\top$ is positive semi-definite and the survey weights $w_i > 0$, $H_{\hat\pi}$ is strictly positive definite provided the biomarker distributions differ across phenotypes:
+   $$
+   v^\top H_{\hat\pi} v = \sum_{i=1}^n w_i \left( \frac{v^\top (a_i - a_{i, K_0})}{m_i(\hat{\pi})} \right)^2 > 0 \quad \forall v \ne \mathbf{0}.
+   $$
+2. **Computational Exactness:** Unlike numerical finite-difference Hessian approximations, this analytical formulation is computationally instantaneous, free of step-size errors, and numerically stable even in the presence of extreme survey weights.
+3. **Information Inversion:** The inverse Hessian $H_{\hat\pi}^{-1}$ constitutes the "bread" of the Godambe sandwich covariance matrix.

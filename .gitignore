@@ -1,0 +1,60 @@
+# =============================================================================
+# Git Ignore Rules for CKM DPMM Survey Repository
+# =============================================================================
+
+# Large Data & Simulation Output Files
+*.rds
+*.RDS
+*.csv
+*.CSV
+*.RData
+*.rda
+*.tar.gz
+*.zip
+
+# Simulation Data Directories (Heavy finite population & replicate samples)
+simulations/data/
+simulations/**/data/
+simulations/results/
+simulations/**/results/
+simulations/posteriors*/
+simulations/**/posteriors*/
+simulations/results_*/
+simulations/**/results_*/
+simulations/summaries/
+simulations/**/summaries/
+
+# SLURM Logs and Temporary Caches
+simulations/logs/
+simulations/**/logs/
+*.out
+*.err
+*.log
+.rcpp_cache/
+.rcpp_cache_*/
+simulations/.rcpp_cache/
+simulations/.rcpp_cache_*/
+
+# Quarto Book Build Artifacts
+book/_book/
+book/.quarto/
+_book/
+.quarto/
+
+# LaTeX Intermediate Files
+docs/*.aux
+docs/*.blg
+docs/*.log
+docs/*.out
+docs/*.synctex.gz
+docs/*.fdb_latexmk
+docs/*.fls
+
+# OS and Editor Metadata
+.DS_Store
+Thumbs.db
+.Rproj.user/
+.Rhistory
+.RData
+.vscode/
+.idea/

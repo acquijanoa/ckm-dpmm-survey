@@ -1,0 +1,46 @@
+# Preface {.unnumbered}
+
+This text provides a self-contained, mathematically rigorous, and fully reproducible presentation of the **Survey-Weighted Dirichlet Process Mixture Model (DPMM)** with **Stratified Cluster Jackknife Variance Estimation** and **Affine Posterior Projection**.
+
+The primary objective is to recover latent subpopulations (phenotypes or disease subtypes) and estimate their finite-population prevalences from complex survey samples—such as stratified, multistage area-probability health surveys—while achieving **calibrated nominal 95% inferential coverage**.
+
+---
+
+## Methodological Overview
+
+Standard Bayesian nonparametric mixture models fit to complex survey data encounter two major challenges:
+1. **Selection Bias & Component Fragmentation:** Under unequal-probability sampling, naive likelihood exponentiation ($w_i$-weighting at the individual level) can fragment true clusters and inflate active component counts. The method presented here uses an **unweighted-allocation rule with survey-weighted aggregate updates** under a sparse Dirichlet prior, which automatically empties superfluous components and targets the population mixture.
+2. **Cluster Correlation & Uncertainty Calibration:** Complex multistage clustering inflates sampling variability. Standard Bayesian pseudo-posteriors are artificially overconfident. This method employs a **raw-mixture marginal pseudolikelihood Godambe sandwich** where the meat matrix is estimated via a **stratified cluster (delete-PSU) jackknife**, recombined with posterior MCMC mixing uncertainty, and projected via an affine Cholesky transformation to restore nominal coverage.
+
+---
+
+## Mathematical Notation
+
+Throughout this book, we adopt standard survey sampling and Bayesian nonparametric notation:
+
+| Symbol | Description |
+| :--- | :--- |
+| $\mathcal{U}$ | Finite target population of size $N$. |
+| $h = 1, \dots, H$ | Strata in the sampling design. |
+| $i = 1, \dots, N_h$ | Primary Sampling Units (PSUs / clusters) in stratum $h$. |
+| $j = 1, \dots, M_{hi}$ | Secondary elements (individuals) within PSU $(h, i)$. |
+| $n = \sum_{h=1}^H \sum_{i=1}^{n_h} m_{hi}$ | Realized complex sample size ($n \ll N$). |
+| $\pi_{hij}$ | Joint inclusion probability $\text{Pr}(j \in \text{sample})$. |
+| $w_{hij} = 1 / \pi_{hij}$ | Design weight, normalized such that $\sum_{i=1}^n w_i = n$. |
+| $Y_i \in \mathbb{R}^P$ | $P$-dimensional continuous biomarker vector for unit $i$. |
+| $z_i \in \{1, \dots, L\}$ | Latent component allocation indicator. |
+| $K_0$ | Number of true active population phenotypes ($K_0 < L$). |
+| $\pi = (\pi_1, \dots, \pi_{K_0})^\top$ | Population phenotype prevalence vector ($\sum_{k=1}^{K_0} \pi_k = 1$). |
+| $H_{\hat\pi}$ | Analytical profile Hessian (bread matrix) of the marginal pseudolikelihood. |
+| $J_{\text{jack}}$ | Stratified delete-PSU jackknife covariance (meat matrix). |
+| $\Sigma_{\text{sandwich}}$ | Cluster-calibrated sandwich covariance matrix. |
+| $\Sigma_{\text{naive}}$ | Empirical MCMC posterior covariance matrix across Gibbs iterations. |
+| $\Sigma_{\text{corrected}}$ | Total recombined covariance ($\Sigma_{\text{sandwich}} + \Sigma_{\text{naive}}$). |
+
+---
+
+## Structure of the Book
+
+* **Part I: The Survey-Weighted DPMM** develops the model formulation, the overfitted mixture representation, the unweighted allocation / weighted aggregate update rule, and the C++ Gibbs sampler with zero-waste full-chain draw retention.
+* **Part II: Survey-Calibrated Uncertainty Quantification** derives the marginal sub-mixture score equations, the analytical profile Hessian, the stratified cluster jackknife, and the Williams–Savitsky affine Cholesky transformation.
+* **Part III: Simulation Benchmark & Implementation** presents the 1,000-replicate Monte Carlo benchmark confirming nominal 95% coverage, along with the complete production R and C++ reference code.

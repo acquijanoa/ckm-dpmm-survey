@@ -1,0 +1,43 @@
+project:
+  type: book
+  output-dir: _book
+
+book:
+  title: "Survey-Weighted Dirichlet Process Mixture Models"
+  subtitle: "Theory, Stratified Jackknife Variance Estimation, and Calibrated Inference"
+  author: "Aquijano"
+  date: today
+  bibliography: references.bib
+  chapters:
+    - index.qmd
+
+    - part: "Part I: The Survey-Weighted DPMM"
+      chapters:
+        - 01-dpmm-survey-formulation.qmd
+        - 02-mcmc-and-relabeling.qmd
+
+    - part: "Part II: Survey-Calibrated Uncertainty Quantification"
+      chapters:
+        - 03-marginal-score-hessian.qmd
+        - 04-stratified-cluster-jackknife.qmd
+        - 05-total-variance-projection.qmd
+
+    - part: "Part III: Simulation Benchmark & Implementation"
+      chapters:
+        - 06-simulation-benchmarks.qmd
+        - 07-computational-codebook.qmd
+
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: show
+    code-copy: true
+    code-tools: true
+    mathjax: true
+  pdf:
+    documentclass: scrreprt
+    number-sections: true
+    toc: true
