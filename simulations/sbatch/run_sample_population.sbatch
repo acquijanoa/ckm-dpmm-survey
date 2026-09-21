@@ -8,11 +8,6 @@
 #   sbatch --export=ALL,CLUSTER_C=0.3 run_sample_population.sbatch
 #   sbatch --export=ALL,CLUSTER_C=1   run_sample_population.sbatch
 #   sbatch --export=ALL,CLUSTER_C=1,N_PSU=20 run_sample_population.sbatch
-#
-# Multi-population variance-decomposition study: submit as an array job
-# matching the population array (POP_ID defaults to $SLURM_ARRAY_TASK_ID),
-# with N_SAMPLES=100 per population, e.g.
-#   sbatch --array=1-25 --export=ALL,CLUSTER_C=0.3,N_SAMPLES=100 run_sample_population.sbatch
 
 #SBATCH --job-name=sample_pop
 #SBATCH --time=00:30:00
@@ -23,7 +18,6 @@
 
 CLUSTER_C="${CLUSTER_C:-0.3}"
 N_PSU="${N_PSU:-4}"
-export POP_ID="${POP_ID:-$SLURM_ARRAY_TASK_ID}"
 N_SAMPLES="${N_SAMPLES:-1000}"
 mkdir -p logs
 

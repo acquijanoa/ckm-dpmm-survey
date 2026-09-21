@@ -38,7 +38,13 @@ suppressPackageStartupMessages({
 
 ## High-Performance C++ Sampling Kernels (`dpmm_helpers.cpp`)
 
-The computationally intensive operations—categorical indicator sampling, survey-weighted sparse Dirichlet draws, $x_2$-informed stick-breaking logistic regression with L2 shrinkage, and the stratified cluster jackknife/bootstrap meat matrices—are implemented in C++ via `RcppArmadillo` in `simulations/src/cpp/dpmm_helpers.cpp`.
+The active computational pipeline relies on three focused C++ kernels implemented via `RcppArmadillo` in `simulations/src/cpp/dpmm_helpers.cpp`:
+
+1. `sample_z_cpp`: Vectorized multinomial sampling of latent indicators.
+2. `sparse_dirichlet_weights_cpp`: Exact conjugate survey-weighted Dirichlet draws under the sparsity prior.
+3. `jackknife_sandwich_cpp`: Deterministic Rao–Wu delete-one-PSU cluster jackknife meat matrix.
+
+*(Note: Earlier pilot functions for covariate-dependent stick-breaking and Monte Carlo bootstrap variance estimation have been archived to `simulations/archive/src/cpp/dpmm_helpers_informed_arm.cpp` as dead code, keeping the active C++ codebase lean and production-focused).*
 
 To compile and load these kernels into your R session:
 
@@ -46,11 +52,11 @@ To compile and load these kernels into your R session:
 Rcpp::sourceCpp("simulations/src/cpp/dpmm_helpers.cpp")
 ```
 
-Below is each function's mathematical derivation, purpose, and complete source code.
+Below is each active kernel's mathematical derivation, purpose, and complete source code.
 
 ### 1. Vectorized Categorical Indicator Sampler (`sample_z_cpp`)
 
-Draws latent cluster indicators $z_i \in \{1, \dots, L\}$ independently across all $n$ units given the normalized $n \times L$ conditional probability matrix $\mathbf{P}$ where $P_{ik} = \mathbb{P}(z_i = k \mid \mathbf{Y}_i, \dots)$. By generating $n$ uniform random variables $u_i \sim \mathcal{U}(0, 1)$ in a single vectorized pass in C++, this avoids $n$ separate R interpreter function calls per Gibbs iteration.
+Draws latent cluster indicators $z_i \in \{1, \dots, L\}$ independently across all $n$ units given the normalized $n \times L$ conditional responsibility matrix $\mathbf{P}$ where $P_{ik} = \mathbb{P}(z_i = k \mid \mathbf{Y}_i, \dots)$. By generating $n$ uniform random variables $u_i \sim \mathcal{U}(0, 1)$ in a single vectorized pass in C++, this avoids $n$ separate R interpreter function calls per Gibbs iteration.
 
 ```cpp
 #include <RcppArmadillo.h>
@@ -86,7 +92,7 @@ IntegerVector sample_z_cpp(const NumericMatrix& probs) {
 
 Implements the exact conjugate Dirichlet update for mixture weights under Rousseau & Mengersen (2011) overfitted mixture theory:
 $$\boldsymbol{\pi} \sim \text{Dirichlet}\left(\frac{\alpha_0}{L} + n_1, \dots, \frac{\alpha_0}{L} + n_L\right), \quad n_k = \sum_{i=1}^n w_i \mathbb{I}(z_i = k)$$
-Sampling is performed via independent Gamma draws $g_k \sim \text{Gamma}(\alpha_0/L + n_k, 1)$ normalized by $\sum_k g_k$. When $\alpha_0 < p/2$, redundant components asymptotically receive weight zero.
+Sampling is performed via independent Gamma draws $g_k \sim \text{Gamma}(\alpha_0/L + n_k, 1)$ normalized by $\sum_k g_k$. When $\alpha_0 < p/2$, redundant components asymptotically receive posterior weight zero and drop out.
 
 ```cpp
 // [[Rcpp::export]]
@@ -112,253 +118,11 @@ NumericVector sparse_dirichlet_weights_cpp(const IntegerVector& z,
 }
 ```
 
-### 3. Covariate-Dependent Stick-Breaking with $L_2$ Shrinkage (`compute_stick_breaking_sparse_cpp`)
+### 3. Stratified Delete-One-PSU Jackknife Meat Matrix (`jackknife_sandwich_cpp`)
 
-For models where mixture weights depend on a continuous covariate $x_{2,i}$ via stick-breaking continuation ratios:
-$$\nu_k(x_{2,i}) = \mathbb{P}(z_i = k \mid z_i \ge k, x_{2,i}) = \text{logit}^{-1}(\beta_{0k} + \beta_{1k} x_{2,i})$$
-To prevent spurious over-splitting in data-sparse sticks, this kernel imposes an $L_2$ shrinkage prior on the intercept toward the sparse Dirichlet baseline draw $v_{0k} = \pi^{(0)}_k / (1 - \sum_{j<k}\pi^{(0)}_j)$:
-$$\beta_{0k} \sim \mathcal{N}\left(\text{logit}(v_{0k}), \tau^2\right)$$
-Each stick's parameters are updated via an analytic $2 \times 2$ Iteratively Reweighted Least Squares (IRLS) routine.
-
-```cpp
-// [[Rcpp::export]]
-NumericMatrix compute_stick_breaking_sparse_cpp(const IntegerVector& z,
-                                                const NumericVector& x2,
-                                                const NumericVector& w,
-                                                int L,
-                                                const NumericVector& pi0,
-                                                double tau) {
-    int n = z.size();
-    NumericMatrix pi_mat(n, L);
-    std::vector<double> remaining(n, 1.0);
-
-    // Stick-breaking decomposition of the sparse Dirichlet draw pi0 (shrinkage target v0_k)
-    std::vector<double> v0(L, 0.0);
-    double remaining0 = 1.0;
-    for (int k = 0; k < L - 1; ++k) {
-        double vk = pi0[k] / std::max(remaining0, 1e-300);
-        vk = std::min(std::max(vk, 1e-6), 1.0 - 1e-6);
-        v0[k] = vk;
-        remaining0 *= (1.0 - vk);
-    }
-
-    double inv_tau2 = 1.0 / (tau * tau);
-
-    for (int k = 1; k < L; ++k) { // k is 1-based stick index: 1 to L-1
-        double v0k = v0[k - 1];
-        double prior_mean0 = std::log(v0k / (1.0 - v0k));
-
-        int m = 0;
-        double sum_y = 0.0;
-        for (int i = 0; i < n; ++i) {
-            if (z[i] >= k) {
-                m++;
-                if (z[i] == k) sum_y += 1.0;
-            }
-        }
-
-        std::vector<double> nu_k(n);
-        if (sum_y < 0.5 || sum_y > m - 0.5 || m < 5) {
-            // Not enough evidence to estimate an x2 slope: fall back to sparse baseline v0k
-            for (int i = 0; i < n; ++i) nu_k[i] = v0k;
-        } else {
-            std::vector<double> sub_y(m), sub_x(m), sub_w(m);
-            int idx = 0;
-            for (int i = 0; i < n; ++i) {
-                if (z[i] >= k) {
-                    sub_y[idx] = (z[i] == k) ? 1.0 : 0.0;
-                    sub_x[idx] = x2[i];
-                    sub_w[idx] = w[i];
-                    idx++;
-                }
-            }
-
-            double b0 = prior_mean0; // start at the shrinkage target
-            double b1 = 0.0;
-
-            for (int iter = 0; iter < 12; ++iter) {
-                double g0 = 0.0, g1 = 0.0;
-                double h00 = 0.0, h01 = 0.0, h11 = 0.0;
-
-                for (int j = 0; j < m; ++j) {
-                    double eta = b0 + b1 * sub_x[j];
-                    double mu = 1.0 / (1.0 + std::exp(-eta));
-                    mu = std::max(1e-12, std::min(1.0 - 1e-12, mu));
-                    double W = sub_w[j] * mu * (1.0 - mu);
-                    double r = sub_w[j] * (sub_y[j] - mu);
-
-                    g0 += r;
-                    g1 += r * sub_x[j];
-                    h00 += W;
-                    h01 += W * sub_x[j];
-                    h11 += W * sub_x[j] * sub_x[j];
-                }
-
-                // L2 shrinkage of intercept toward prior_mean0; slope is unpenalized
-                g0 -= (b0 - prior_mean0) * inv_tau2;
-                h00 += inv_tau2;
-
-                double det = h00 * h11 - h01 * h01;
-                if (std::abs(det) < 1e-12 || !std::isfinite(det)) break;
-
-                double delta0 = (h11 * g0 - h01 * g1) / det;
-                double delta1 = (-h01 * g0 + h00 * g1) / det;
-
-                b0 += delta0;
-                b1 += delta1;
-
-                if (std::abs(delta0) + std::abs(delta1) < 1e-6) break;
-            }
-
-            for (int i = 0; i < n; ++i) {
-                double eta = b0 + b1 * x2[i];
-                nu_k[i] = 1.0 / (1.0 + std::exp(-eta));
-            }
-        }
-
-        for (int i = 0; i < n; ++i) {
-            pi_mat(i, k - 1) = nu_k[i] * remaining[i];
-            remaining[i] *= (1.0 - nu_k[i]);
-        }
-    }
-
-    for (int i = 0; i < n; ++i) pi_mat(i, L - 1) = remaining[i];
-
-    return pi_mat;
-}
-```
-
-### 4. Standard Unpenalized Stick-Breaking IRLS (`compute_stick_breaking_cpp`)
-
-Standard weighted logistic stick-breaking regression without shrinkage, provided for comparison benchmarks:
-
-```cpp
-// [[Rcpp::export]]
-NumericMatrix compute_stick_breaking_cpp(const IntegerVector& z, 
-                                         const NumericVector& x2, 
-                                         const NumericVector& w, 
-                                         int L) {
-    int n = z.size();
-    NumericMatrix pi_mat(n, L);
-    std::vector<double> remaining(n, 1.0);
-
-    for (int k = 1; k < L; ++k) {
-        int m = 0;
-        double sum_y = 0.0;
-        for (int i = 0; i < n; ++i) {
-            if (z[i] >= k) {
-                m++;
-                if (z[i] == k) sum_y += 1.0;
-            }
-        }
-
-        std::vector<double> nu_k(n);
-        if (sum_y < 0.5 || sum_y > m - 0.5 || m < 5) {
-            double mean_val = (sum_y + 1e-3 * m) / (double)m;
-            for (int i = 0; i < n; ++i) nu_k[i] = mean_val;
-        } else {
-            std::vector<double> sub_y(m), sub_x(m), sub_w(m);
-            int idx = 0;
-            for (int i = 0; i < n; ++i) {
-                if (z[i] >= k) {
-                    sub_y[idx] = (z[i] == k) ? 1.0 : 0.0;
-                    sub_x[idx] = x2[i];
-                    sub_w[idx] = w[i];
-                    idx++;
-                }
-            }
-
-            double p_init = std::max(1e-4, std::min(1.0 - 1e-4, sum_y / (double)m));
-            double b0 = std::log(p_init / (1.0 - p_init));
-            double b1 = 0.0;
-
-            for (int iter = 0; iter < 12; ++iter) {
-                double g0 = 0.0, g1 = 0.0;
-                double h00 = 0.0, h01 = 0.0, h11 = 0.0;
-
-                for (int j = 0; j < m; ++j) {
-                    double eta = b0 + b1 * sub_x[j];
-                    double mu = 1.0 / (1.0 + std::exp(-eta));
-                    mu = std::max(1e-12, std::min(1.0 - 1e-12, mu));
-                    double W = sub_w[j] * mu * (1.0 - mu);
-                    double r = sub_w[j] * (sub_y[j] - mu);
-
-                    g0 += r;
-                    g1 += r * sub_x[j];
-                    h00 += W;
-                    h01 += W * sub_x[j];
-                    h11 += W * sub_x[j] * sub_x[j];
-                }
-
-                double det = h00 * h11 - h01 * h01;
-                if (std::abs(det) < 1e-12 || !std::isfinite(det)) break;
-
-                double delta0 = (h11 * g0 - h01 * g1) / det;
-                double delta1 = (-h01 * g0 + h00 * g1) / det;
-
-                b0 += delta0;
-                b1 += delta1;
-
-                if (std::abs(delta0) + std::abs(delta1) < 1e-6) break;
-            }
-
-            for (int i = 0; i < n; ++i) {
-                double eta = b0 + b1 * x2[i];
-                nu_k[i] = 1.0 / (1.0 + std::exp(-eta));
-            }
-        }
-
-        for (int i = 0; i < n; ++i) {
-            pi_mat(i, k - 1) = nu_k[i] * remaining[i];
-            remaining[i] *= (1.0 - nu_k[i]);
-        }
-    }
-
-    for (int i = 0; i < n; ++i) pi_mat(i, L - 1) = remaining[i];
-
-    return pi_mat;
-}
-```
-
-### 5. Stratified PSU-Level Bootstrap Meat Matrix (`fast_sandwich_bootstrap_cpp`)
-
-Estimates the complex survey design variance of the profile score vector $\mathbf{S}_{\pi} = \sum_{h=1}^H \sum_{i \in \mathcal{S}_h} \mathbf{s}_{hi}$ via stratified cluster bootstrapping. Within each stratum $h$, $n_h$ PSUs are resampled with replacement $B$ times, and the empirical covariance across bootstrap replicates is computed via `arma::cov`.
-
-```cpp
-// [[Rcpp::export]]
-arma::mat fast_sandwich_bootstrap_cpp(const arma::mat& psu_scores,
-                                      const Rcpp::List& stratum_psu_indices,
-                                      int B) {
-    int Kd = psu_scores.n_cols;
-    int H = stratum_psu_indices.size();
-    arma::mat score_boot(B, Kd, arma::fill::zeros);
-
-    for (int b = 0; b < B; ++b) {
-        arma::rowvec b_score(Kd, arma::fill::zeros);
-        for (int h = 0; h < H; ++h) {
-            Rcpp::IntegerVector psus_in_h = stratum_psu_indices[h];
-            int nh = psus_in_h.size();
-            if (nh == 0) continue;
-            for (int r = 0; r < nh; ++r) {
-                int pick = (int)(R::runif(0.0, 1.0) * nh);
-                if (pick >= nh) pick = nh - 1;
-                int psu_row = psus_in_h[pick];
-                b_score += psu_scores.row(psu_row);
-            }
-        }
-        score_boot.row(b) = b_score;
-    }
-
-    arma::mat J_hat = arma::cov(score_boot);
-    return J_hat;
-}
-```
-
-### 6. Stratified Delete-One-PSU Jackknife Meat Matrix (`jackknife_sandwich_cpp`)
-
-For linear score totals $\mathbf{S} = \sum_{h=1}^H \sum_{i=1}^{n_h} \mathbf{t}_{hi}$, the delete-one-PSU jackknife estimator reduces algebraically to the exact, closed-form Rao–Wu ultimate cluster variance:
+For linear (additive-over-PSU) profile score totals $\mathbf{S}_{\pi} = \sum_{h=1}^H \sum_{i \in \mathcal{S}_h} \mathbf{t}_{hi}$, the delete-one-PSU jackknife estimator reduces algebraically to the exact, closed-form Rao–Wu ultimate cluster variance:
 $$\mathbf{J}_{\text{jack}} = \sum_{h=1}^H \frac{n_h}{n_h - 1} \sum_{i=1}^{n_h} (\mathbf{t}_{hi} - \bar{\mathbf{t}}_h)(\mathbf{t}_{hi} - \bar{\mathbf{t}}_h)^\top$$
-This provides deterministic computation with zero Monte Carlo resampling error:
+This is the $B \to \infty$ limit of a cluster bootstrap with zero Monte Carlo resampling noise and no resampling hyperparameter $B$. Strata with a single sampled PSU ($n_h < 2$) contribute zero.
 
 ```cpp
 // [[Rcpp::export]]
@@ -406,14 +170,12 @@ floor_eigen <- function(Sigma, floor = 0.05) {
 #' Blocked Gibbs Sampler for Survey-Weighted DPMM
 #' @param Y Manifest variables matrix (n x P)
 #' @param w Normalized survey weights (length n, sum(w) = n)
-#' @param x2 Optional continuous covariate (length n) for stick-breaking
 #' @param L Truncation level (default 10)
 #' @param n_iter Total MCMC iterations (default 1500)
 #' @param n_burnin Burn-in iterations (default 500)
 #' @param alpha0 Sparse Dirichlet concentration parameter (default 1.0)
-#' @param tau L2 shrinkage standard deviation for stick-breaking intercepts (default 1.0)
-fit_wdpmm <- function(Y, w, x2 = NULL, L = 10, n_iter = 1500, n_burnin = 500,
-                       alpha0 = 1.0, tau = 1.0, kappa0 = 0.5, nu0 = ncol(Y) + 2) {
+fit_wdpmm <- function(Y, w, L = 10, n_iter = 1500, n_burnin = 500,
+                       alpha0 = 1.0, kappa0 = 0.5, nu0 = ncol(Y) + 2) {
   n <- nrow(Y); p <- ncol(Y)
   mu0 <- colMeans(Y)
   Psi0 <- diag(apply(Y, 2, var)) * (nu0 - p - 1)
@@ -427,16 +189,8 @@ fit_wdpmm <- function(Y, w, x2 = NULL, L = 10, n_iter = 1500, n_burnin = 500,
   draw_idx <- 0
   
   for (iter in seq_len(n_iter)) {
-    # 1. Update population mixture weights
-    if (is.null(x2)) {
-      # Covariate-free arm: sparse Dirichlet conjugate draw
-      pi0 <- sparse_dirichlet_weights_cpp(z, w, L, alpha0)
-      pi_mat <- matrix(pi0, n, L, byrow = TRUE)
-    } else {
-      # Covariate-dependent arm: stick-breaking with sparse Dirichlet shrinkage
-      pi0 <- sparse_dirichlet_weights_cpp(z, w, L, alpha0)
-      pi_mat <- compute_stick_breaking_sparse_cpp(z, x2, w, L, pi0, tau)
-    }
+    # 1. Update population mixture weights under sparse Dirichlet prior
+    pi_k <- sparse_dirichlet_weights_cpp(z, w, L, alpha0)
     
     # 2. Draw unweighted latent allocations via log-sum-exp and C++ sampler
     logp <- matrix(-Inf, n, L)
@@ -445,7 +199,7 @@ fit_wdpmm <- function(Y, w, x2 = NULL, L = 10, n_iter = 1500, n_burnin = 500,
         mvtnorm::dmvnorm(Y, mean = mu_k[[k]], sigma = Sigma_k[[k]], log = TRUE),
         error = function(e) rep(-1e10, n)
       )
-      logp[, k] <- log(pmax(pi_mat[, k], 1e-12)) + dens
+      logp[, k] <- log(pmax(pi_k[k], 1e-12)) + dens
     }
     logp <- logp - apply(logp, 1, max)
     probs <- exp(logp); probs <- probs / rowSums(probs)
@@ -671,23 +425,18 @@ compute_profile_hessian_and_scores <- function(a_mat, pi_bar, weights) {
 The deterministic delete-PSU jackknife routine calculates the meat matrix $J_{\text{jack}}$ across all strata and clusters:
 
 ```r
-#' Stratified Cluster Variance for Marginal Profile Score
+#' Stratified Delete-PSU Jackknife for Marginal Profile Score
 #' 
 #' Uses the high-performance C++ jackknife kernel `jackknife_sandwich_cpp`
-#' (implementing the exact Rao-Wu closed form delete-one-PSU variance)
-#' with optional fallback to `fast_sandwich_bootstrap_cpp`.
+#' implementing the exact Rao-Wu closed-form delete-one-PSU ultimate cluster variance.
 #' 
 #' @param a_mat Matrix of sub-mixture densities (n x K_hat)
 #' @param pi_bar Current prevalence vector (length K_hat)
 #' @param weights Survey design weights
 #' @param strata Stratum indicator vector
 #' @param clusters Cluster (PSU) indicator vector
-#' @param method Variance method: "jackknife" (default, deterministic) or "bootstrap"
-#' @param B Number of bootstrap replicates if method = "bootstrap" (default 200)
 #' @return The calibrated meat matrix J_jack ((K_hat-1) x (K_hat-1))
-compute_jackknife_meat <- function(a_mat, pi_bar, weights, strata, clusters,
-                                   method = c("jackknife", "bootstrap"), B = 200) {
-  method <- match.arg(method)
+compute_jackknife_meat <- function(a_mat, pi_bar, weights, strata, clusters) {
   K_hat <- ncol(a_mat)
   K_free <- K_hat - 1
   m_i <- pmax(as.vector(a_mat %*% pi_bar), 1e-12)
@@ -696,7 +445,7 @@ compute_jackknife_meat <- function(a_mat, pi_bar, weights, strata, clusters,
   # Unit score contributions: w_i * (a_ik - a_iK) / m_i
   unit_scores <- (weights / m_i) * diff_mat
   
-  # Map PSUs and strata for high-performance C++ kernels
+  # Map PSUs and strata for high-performance C++ kernel
   psu_id <- interaction(strata, clusters, drop = TRUE)
   unique_psus <- unique(psu_id)
   n_psus <- length(unique_psus)
@@ -716,12 +465,8 @@ compute_jackknife_meat <- function(a_mat, pi_bar, weights, strata, clusters,
     as.integer(psu_map[as.character(h_psus)])
   })
   
-  # Call C++ kernel: deterministic delete-PSU jackknife or Monte Carlo bootstrap
-  if (method == "jackknife") {
-    J_raw <- jackknife_sandwich_cpp(psu_scores, stratum_psu_indices)
-  } else {
-    J_raw <- fast_sandwich_bootstrap_cpp(psu_scores, stratum_psu_indices, as.integer(B))
-  }
+  # Call C++ kernel: deterministic delete-PSU jackknife
+  J_raw <- jackknife_sandwich_cpp(psu_scores, stratum_psu_indices)
   
   # Finite-sample design-df scale factor: c_corr = M / (M - H)
   H <- length(strata_ids)
