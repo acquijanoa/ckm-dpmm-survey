@@ -2,21 +2,25 @@ name: Render and Publish Quarto Book
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   pages: write
   id-token: write
 
 concurrency:
-  group: "pages"
+  group: pages
   cancel-in-progress: false
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -27,16 +31,15 @@ jobs:
           version: release
 
       - name: Render Quarto Book
-        run: |
-          quarto render book --to html
+        run: quarto render book --to html
 
       - name: Setup Pages
-        uses: actions/configure-pages@v4
+        uses: actions/configure-pages@v5
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: 'book/_book'
+          path: book/_book
 
       - name: Deploy to GitHub Pages
         id: deployment
