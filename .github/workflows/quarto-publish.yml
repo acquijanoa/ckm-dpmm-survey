@@ -24,11 +24,11 @@ jobs:
       - name: Set up Quarto
         uses: quarto-dev/quarto-actions/setup@v2
         with:
-          version: pre-release
+          version: release
 
       - name: Render Quarto Book
         run: |
-          quarto render book
+          quarto render book --to html
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

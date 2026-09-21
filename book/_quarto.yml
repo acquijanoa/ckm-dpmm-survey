@@ -7,7 +7,6 @@ book:
   subtitle: "Theory, Stratified Jackknife Variance Estimation, and Calibrated Inference"
   author: "Aquijano"
   date: today
-  bibliography: references.bib
   chapters:
     - index.qmd
 
@@ -26,6 +25,8 @@ book:
       chapters:
         - 06-simulation-benchmarks.qmd
         - 07-computational-codebook.qmd
+
+bibliography: references.bib
 
 format:
   html:
