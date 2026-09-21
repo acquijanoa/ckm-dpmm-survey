@@ -40,7 +40,17 @@ suppressPackageStartupMessages({
 
 The computationally intensive operations—categorical indicator sampling, survey-weighted sparse Dirichlet draws, $x_2$-informed stick-breaking logistic regression with L2 shrinkage, and the stratified cluster jackknife/bootstrap meat matrices—are implemented in C++ via `RcppArmadillo` in `simulations/src/cpp/dpmm_helpers.cpp`.
 
-Here is the complete C++ source file containing all helper functions (`sample_z_cpp`, `sparse_dirichlet_weights_cpp`, `compute_stick_breaking_sparse_cpp`, `compute_stick_breaking_cpp`, `fast_sandwich_bootstrap_cpp`, and `jackknife_sandwich_cpp`):
+To compile and load these kernels into your R session:
+
+```r
+Rcpp::sourceCpp("simulations/src/cpp/dpmm_helpers.cpp")
+```
+
+Below is each function's mathematical derivation, purpose, and complete source code.
+
+### 1. Vectorized Categorical Indicator Sampler (`sample_z_cpp`)
+
+Draws latent cluster indicators $z_i \in \{1, \dots, L\}$ independently across all $n$ units given the normalized $n \times L$ conditional probability matrix $\mathbf{P}$ where $P_{ik} = \mathbb{P}(z_i = k \mid \mathbf{Y}_i, \dots)$. By generating $n$ uniform random variables $u_i \sim \mathcal{U}(0, 1)$ in a single vectorized pass in C++, this avoids $n$ separate R interpreter function calls per Gibbs iteration.
 
 ```cpp
 #include <RcppArmadillo.h>
@@ -49,9 +59,6 @@ Here is the complete C++ source file containing all helper functions (`sample_z_
 
 using namespace Rcpp;
 
-// ---------------------------------------------------------------------------
-// 1. Vectorized sampling of cluster indicators z_i from probabilities
-// ---------------------------------------------------------------------------
 // [[Rcpp::export]]
 IntegerVector sample_z_cpp(const NumericMatrix& probs) {
     int n = probs.nrow();
@@ -73,11 +80,15 @@ IntegerVector sample_z_cpp(const NumericMatrix& probs) {
     }
     return z;
 }
+```
 
-// ---------------------------------------------------------------------------
-// 2. Sparse Dirichlet mixture weights (naive arm and shared shrinkage baseline)
-//    pi ~ Dirichlet(alpha0/L + n_1, ..., alpha0/L + n_L), n_k = sum_i w_i I(z_i = k)
-// ---------------------------------------------------------------------------
+### 2. Survey-Weighted Sparse Dirichlet Sampling (`sparse_dirichlet_weights_cpp`)
+
+Implements the exact conjugate Dirichlet update for mixture weights under Rousseau & Mengersen (2011) overfitted mixture theory:
+$$\boldsymbol{\pi} \sim \text{Dirichlet}\left(\frac{\alpha_0}{L} + n_1, \dots, \frac{\alpha_0}{L} + n_L\right), \quad n_k = \sum_{i=1}^n w_i \mathbb{I}(z_i = k)$$
+Sampling is performed via independent Gamma draws $g_k \sim \text{Gamma}(\alpha_0/L + n_k, 1)$ normalized by $\sum_k g_k$. When $\alpha_0 < p/2$, redundant components asymptotically receive weight zero.
+
+```cpp
 // [[Rcpp::export]]
 NumericVector sparse_dirichlet_weights_cpp(const IntegerVector& z,
                                            const NumericVector& w,
@@ -99,10 +110,17 @@ NumericVector sparse_dirichlet_weights_cpp(const IntegerVector& z,
     for (int k = 0; k < L; ++k) pi0[k] /= total;
     return pi0;
 }
+```
 
-// ---------------------------------------------------------------------------
-// 3a. x2-informed per-stick logistic regression, shrunk toward the sparse baseline pi0
-// ---------------------------------------------------------------------------
+### 3. Covariate-Dependent Stick-Breaking with $L_2$ Shrinkage (`compute_stick_breaking_sparse_cpp`)
+
+For models where mixture weights depend on a continuous covariate $x_{2,i}$ via stick-breaking continuation ratios:
+$$\nu_k(x_{2,i}) = \mathbb{P}(z_i = k \mid z_i \ge k, x_{2,i}) = \text{logit}^{-1}(\beta_{0k} + \beta_{1k} x_{2,i})$$
+To prevent spurious over-splitting in data-sparse sticks, this kernel imposes an $L_2$ shrinkage prior on the intercept toward the sparse Dirichlet baseline draw $v_{0k} = \pi^{(0)}_k / (1 - \sum_{j<k}\pi^{(0)}_j)$:
+$$\beta_{0k} \sim \mathcal{N}\left(\text{logit}(v_{0k}), \tau^2\right)$$
+Each stick's parameters are updated via an analytic $2 \times 2$ Iteratively Reweighted Least Squares (IRLS) routine.
+
+```cpp
 // [[Rcpp::export]]
 NumericMatrix compute_stick_breaking_sparse_cpp(const IntegerVector& z,
                                                 const NumericVector& x2,
@@ -176,7 +194,7 @@ NumericMatrix compute_stick_breaking_sparse_cpp(const IntegerVector& z,
                     h11 += W * sub_x[j] * sub_x[j];
                 }
 
-                // L2 shrinkage of the intercept toward prior_mean0; slope unpenalized
+                // L2 shrinkage of intercept toward prior_mean0; slope is unpenalized
                 g0 -= (b0 - prior_mean0) * inv_tau2;
                 h00 += inv_tau2;
 
@@ -208,10 +226,13 @@ NumericMatrix compute_stick_breaking_sparse_cpp(const IntegerVector& z,
 
     return pi_mat;
 }
+```
 
-// ---------------------------------------------------------------------------
-// 3b. Standard Unpenalized Stick-Breaking IRLS Logistic Regression
-// ---------------------------------------------------------------------------
+### 4. Standard Unpenalized Stick-Breaking IRLS (`compute_stick_breaking_cpp`)
+
+Standard weighted logistic stick-breaking regression without shrinkage, provided for comparison benchmarks:
+
+```cpp
 // [[Rcpp::export]]
 NumericMatrix compute_stick_breaking_cpp(const IntegerVector& z, 
                                          const NumericVector& x2, 
@@ -297,10 +318,13 @@ NumericMatrix compute_stick_breaking_cpp(const IntegerVector& z,
 
     return pi_mat;
 }
+```
 
-// ---------------------------------------------------------------------------
-// 4. Stratified PSU-level Sandwich Bootstrap Covariance (J_hat)
-// ---------------------------------------------------------------------------
+### 5. Stratified PSU-Level Bootstrap Meat Matrix (`fast_sandwich_bootstrap_cpp`)
+
+Estimates the complex survey design variance of the profile score vector $\mathbf{S}_{\pi} = \sum_{h=1}^H \sum_{i \in \mathcal{S}_h} \mathbf{s}_{hi}$ via stratified cluster bootstrapping. Within each stratum $h$, $n_h$ PSUs are resampled with replacement $B$ times, and the empirical covariance across bootstrap replicates is computed via `arma::cov`.
+
+```cpp
 // [[Rcpp::export]]
 arma::mat fast_sandwich_bootstrap_cpp(const arma::mat& psu_scores,
                                       const Rcpp::List& stratum_psu_indices,
@@ -328,12 +352,15 @@ arma::mat fast_sandwich_bootstrap_cpp(const arma::mat& psu_scores,
     arma::mat J_hat = arma::cov(score_boot);
     return J_hat;
 }
+```
 
-// ---------------------------------------------------------------------------
-// 5. Stratified Delete-One-PSU Jackknife Covariance (J_hat)
-//    Algebraically identical to the Rao-Wu with-replacement variance estimator:
-//    J_hat = sum_h [n_h / (n_h - 1)] * sum_{i in h} (t_hi - tbar_h)(t_hi - tbar_h)'
-// ---------------------------------------------------------------------------
+### 6. Stratified Delete-One-PSU Jackknife Meat Matrix (`jackknife_sandwich_cpp`)
+
+For linear score totals $\mathbf{S} = \sum_{h=1}^H \sum_{i=1}^{n_h} \mathbf{t}_{hi}$, the delete-one-PSU jackknife estimator reduces algebraically to the exact, closed-form Rao–Wu ultimate cluster variance:
+$$\mathbf{J}_{\text{jack}} = \sum_{h=1}^H \frac{n_h}{n_h - 1} \sum_{i=1}^{n_h} (\mathbf{t}_{hi} - \bar{\mathbf{t}}_h)(\mathbf{t}_{hi} - \bar{\mathbf{t}}_h)^\top$$
+This provides deterministic computation with zero Monte Carlo resampling error:
+
+```cpp
 // [[Rcpp::export]]
 arma::mat jackknife_sandwich_cpp(const arma::mat& psu_scores,
                                   const Rcpp::List& stratum_psu_indices) {
