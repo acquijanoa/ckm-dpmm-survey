@@ -209,6 +209,95 @@ NumericMatrix compute_stick_breaking_sparse_cpp(const IntegerVector& z,
 }
 
 // ---------------------------------------------------------------------------
+// 3b. Standard Unpenalized Stick-Breaking IRLS Logistic Regression
+// ---------------------------------------------------------------------------
+// [[Rcpp::export]]
+NumericMatrix compute_stick_breaking_cpp(const IntegerVector& z, 
+                                         const NumericVector& x2, 
+                                         const NumericVector& w, 
+                                         int L) {
+    int n = z.size();
+    NumericMatrix pi_mat(n, L);
+    std::vector<double> remaining(n, 1.0);
+
+    for (int k = 1; k < L; ++k) {
+        int m = 0;
+        double sum_y = 0.0;
+        for (int i = 0; i < n; ++i) {
+            if (z[i] >= k) {
+                m++;
+                if (z[i] == k) sum_y += 1.0;
+            }
+        }
+
+        std::vector<double> nu_k(n);
+        if (sum_y < 0.5 || sum_y > m - 0.5 || m < 5) {
+            double mean_val = (sum_y + 1e-3 * m) / (double)m;
+            for (int i = 0; i < n; ++i) nu_k[i] = mean_val;
+        } else {
+            std::vector<double> sub_y(m), sub_x(m), sub_w(m);
+            int idx = 0;
+            for (int i = 0; i < n; ++i) {
+                if (z[i] >= k) {
+                    sub_y[idx] = (z[i] == k) ? 1.0 : 0.0;
+                    sub_x[idx] = x2[i];
+                    sub_w[idx] = w[i];
+                    idx++;
+                }
+            }
+
+            double p_init = std::max(1e-4, std::min(1.0 - 1e-4, sum_y / (double)m));
+            double b0 = std::log(p_init / (1.0 - p_init));
+            double b1 = 0.0;
+
+            for (int iter = 0; iter < 12; ++iter) {
+                double g0 = 0.0, g1 = 0.0;
+                double h00 = 0.0, h01 = 0.0, h11 = 0.0;
+
+                for (int j = 0; j < m; ++j) {
+                    double eta = b0 + b1 * sub_x[j];
+                    double mu = 1.0 / (1.0 + std::exp(-eta));
+                    mu = std::max(1e-12, std::min(1.0 - 1e-12, mu));
+                    double W = sub_w[j] * mu * (1.0 - mu);
+                    double r = sub_w[j] * (sub_y[j] - mu);
+
+                    g0 += r;
+                    g1 += r * sub_x[j];
+                    h00 += W;
+                    h01 += W * sub_x[j];
+                    h11 += W * sub_x[j] * sub_x[j];
+                }
+
+                double det = h00 * h11 - h01 * h01;
+                if (std::abs(det) < 1e-12 || !std::isfinite(det)) break;
+
+                double delta0 = (h11 * g0 - h01 * g1) / det;
+                double delta1 = (-h01 * g0 + h00 * g1) / det;
+
+                b0 += delta0;
+                b1 += delta1;
+
+                if (std::abs(delta0) + std::abs(delta1) < 1e-6) break;
+            }
+
+            for (int i = 0; i < n; ++i) {
+                double eta = b0 + b1 * x2[i];
+                nu_k[i] = 1.0 / (1.0 + std::exp(-eta));
+            }
+        }
+
+        for (int i = 0; i < n; ++i) {
+            pi_mat(i, k - 1) = nu_k[i] * remaining[i];
+            remaining[i] *= (1.0 - nu_k[i]);
+        }
+    }
+
+    for (int i = 0; i < n; ++i) pi_mat(i, L - 1) = remaining[i];
+
+    return pi_mat;
+}
+
+// ---------------------------------------------------------------------------
 // 4. Stratified PSU-level Sandwich Bootstrap Covariance (J_hat)
 //    (unchanged from dpmm_helpers.cpp)
 // ---------------------------------------------------------------------------
