@@ -177,8 +177,8 @@ floor_eigen <- function(Sigma, floor = 0.05) {
 fit_wdpmm <- function(Y, w, L = 10, n_iter = 1500, n_burnin = 500,
                        alpha0 = 1.0, kappa0 = 0.5, nu0 = ncol(Y) + 2) {
   n <- nrow(Y); p <- ncol(Y)
-  mu0 <- colMeans(Y)
-  Psi0 <- diag(apply(Y, 2, var)) * (nu0 - p - 1)
+  mu0 <- colSums(Y * w) / sum(w)
+  Psi0 <- diag(colSums(w * sweep(Y, 2, mu0)^2) / sum(w)) * (nu0 - p - 1)
   
   z <- sample.int(L, n, replace = TRUE)
   mu_k <- lapply(seq_len(L), function(k) mu0 + rnorm(p, 0, 1))

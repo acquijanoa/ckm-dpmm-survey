@@ -254,8 +254,8 @@ floor_eigen <- function(Sigma, floor = SIGMA_FLOOR) {
 fit_wdpmm <- function(Y, w, L = L_TRUNC, n_iter = N_MCMC_ITER, n_burnin = N_BURNIN,
                        alpha0 = ALPHA0_SPARSE, kappa0 = 0.5, nu0 = P_DIM + 2) {
   n <- nrow(Y); p <- ncol(Y)
-  mu0 <- colMeans(Y)
-  Psi0 <- diag(apply(Y, 2, var)) * (nu0 - p - 1)
+  mu0 <- colSums(Y * w) / sum(w)
+  Psi0 <- diag(colSums(w * sweep(Y, 2, mu0)^2) / sum(w)) * (nu0 - p - 1)
 
   z <- sample.int(L, n, replace = TRUE)
   mu_k <- lapply(seq_len(L), function(k) mu0 + rnorm(p, 0, 1))
@@ -263,7 +263,6 @@ fit_wdpmm <- function(Y, w, L = L_TRUNC, n_iter = N_MCMC_ITER, n_burnin = N_BURN
 
   keep <- (n_burnin + 1):n_iter
   z_draws <- matrix(NA_integer_, length(keep), n)
-  min_eig_trace <- numeric(n_iter)
   draw_i <- 0
 
   for (iter in seq_len(n_iter)) {
@@ -510,7 +509,7 @@ relabel_and_summarize <- function(fit, w, Y, K_active_min, coverage = 0.99, orac
 # header), using a_mat (n x K0) -- the TRUE sub-mixture density per
 # phenotype, reconstructed from the original unmerged raw fitted components
 # (relabel_and_summarize's a_mat), not a single-Gaussian approximation.
-sandwich_correct_prevalence <- function(prev_draws, w, psu_id, stratum, z_point,
+sandwich_correct_prevalence <- function(prev_draws, w, psu_id, stratum,
                                          K_active, a_mat,
                                          apply_corr = APPLY_CORR) {
   pi_full <- colMeans(prev_draws)
@@ -604,7 +603,7 @@ run_one_sample <- function(sample_id) {
   K_active_min <- K0 + 2
   rl <- relabel_and_summarize(fit, samp$w, samp$Y, K_active_min)
   sw <- sandwich_correct_prevalence(rl$prev_draws, samp$w, samp$psu_id,
-                                     samp$stratum, rl$z_point_estimate, rl$K_active, rl$a_mat)
+                                     samp$stratum, rl$K_active, rl$a_mat)
 
   list(pi_hat = sw$pi_hat, adjusted_draws = sw$adjusted_draws,
        K_active = rl$K_active, K_raw_active = rl$K_raw_active,
