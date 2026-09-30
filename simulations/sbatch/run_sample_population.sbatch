@@ -1,13 +1,6 @@
 #!/bin/bash
-# CLUSTER_C selects the clustering-strength grid point (default 0.3),
-# matching whichever population run_generate_population.sbatch produced.
-# N_PSU selects the PSUs-per-stratum grid point (default 4, the original
-# design); other values sample more/fewer, smaller/larger clusters at the
-# same overall sampling fraction f. N_SAMPLES sets how many samples to draw
-# (default 1000).
-#   sbatch --export=ALL,CLUSTER_C=0.3 run_sample_population.sbatch
-#   sbatch --export=ALL,CLUSTER_C=1   run_sample_population.sbatch
-#   sbatch --export=ALL,CLUSTER_C=1,N_PSU=20 run_sample_population.sbatch
+# Draw N_SAMPLES two-stage samples from one population.
+#   sbatch --export=ALL,CLUSTER_C=0.3,N_PSU=4 run_sample_population.sbatch
 
 #SBATCH --job-name=sample_pop
 #SBATCH --time=00:30:00
@@ -16,8 +9,8 @@
 #SBATCH --output=logs/sample_pop_%j.out
 #SBATCH --error=logs/sample_pop_%j.err
 
-CLUSTER_C="${CLUSTER_C:-0.3}"
-N_PSU="${N_PSU:-4}"
+export CLUSTER_C="${CLUSTER_C:-0.3}"
+export N_PSU="${N_PSU:-4}"
 N_SAMPLES="${N_SAMPLES:-1000}"
 mkdir -p logs
 
