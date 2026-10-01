@@ -10,7 +10,6 @@
 #   CLUSTER_C, N_PSU   scenario (0.3, 4)
 #   MERGE              datadriven (default) | truth
 #   THRESHOLD          1 (default) | 0   threshold consolidation
-#   DESIGN_DF          1 (default) | 0   design-df correction
 #   OUT_TAG            replaces RESULT_TAG (smoke tests)
 #
 # Summaries across replicates: summarize.R.
@@ -62,7 +61,6 @@ CLUSTER_C_STR <- Sys.getenv("CLUSTER_C", unset = "0.3")
 N_PSU_STR     <- Sys.getenv("N_PSU", unset = "4")
 MERGE         <- match.arg(Sys.getenv("MERGE", unset = "datadriven"), c("datadriven", "truth"))
 THRESHOLD     <- Sys.getenv("THRESHOLD", unset = "1") == "1" && MERGE == "datadriven"
-DESIGN_DF     <- Sys.getenv("DESIGN_DF", unset = "1") == "1"
 
 # Scenario tag c<C>[_npsu<N>]; the default 4 PSUs adds no suffix.
 SCENARIO <- sprintf("c%s", CLUSTER_C_STR)
@@ -70,8 +68,7 @@ if (N_PSU_STR != "4") SCENARIO <- paste0(SCENARIO, "_npsu", N_PSU_STR)
 
 # Production is the bare scenario tag; a suffix names each departure from it.
 RESULT_TAG <- paste0(SCENARIO,
-                     if (MERGE == "truth") "_truth" else if (!THRESHOLD) "_nothresh",
-                     if (!DESIGN_DF) "_nodf")
+                     if (MERGE == "truth") "_truth" else if (!THRESHOLD) "_nothresh")
 OUT_TAG <- Sys.getenv("OUT_TAG", unset = "")
 if (nzchar(OUT_TAG)) RESULT_TAG <- OUT_TAG
 
@@ -401,9 +398,9 @@ unit_scores <- function(eta, Y, w, G) {
 # weighted Gaussian mixture with one component per phenotype, started from
 # the phenotype partition z_pheno. H is the numerical Jacobian of the score,
 # J the delete-one-PSU jackknife of the PSU score totals. Returns the K x K
-# prevalence covariance and SEs. With design_df, V is scaled by M/(M - H)
-# and intervals use t_{M-H}.
-godambe_sandwich <- function(Y, w, z_pheno, psu_id, stratum, K, design_df = DESIGN_DF) {
+# prevalence covariance and SEs, and the t critical value on M - H degrees of
+# freedom (sampled PSUs minus strata).
+godambe_sandwich <- function(Y, w, z_pheno, psu_id, stratum, K) {
   keep <- sort(unique(z_pheno))
   G <- length(keep)
   if (G < 2) stop("fewer than two phenotypes in the partition")
@@ -430,14 +427,9 @@ godambe_sandwich <- function(Y, w, z_pheno, psu_id, stratum, K, design_df = DESI
   })
   J_hat <- jackknife_sandwich_cpp(psu_scores, stratum_psu_indices)
 
-  M_psu <- length(unique_psus)
-  H_strata <- length(unique(stratum))
-  df_design <- max(M_psu - H_strata, 1)
-  c_corr <- if (design_df) M_psu / df_design else 1
-  t_crit <- if (design_df) qt(0.975, df_design) else qnorm(0.975)
-
   H_inv <- solve(H_hat)
-  V_eta <- c_corr * H_inv %*% J_hat %*% H_inv
+  V_eta <- H_inv %*% J_hat %*% H_inv
+  df_design <- max(length(unique_psus) - length(unique(stratum)), 1)
 
   # Prevalence block -> all G components (pi_G = 1 - sum) -> K phenotypes.
   B <- rbind(diag(G - 1), -1)
@@ -448,8 +440,7 @@ godambe_sandwich <- function(Y, w, z_pheno, psu_id, stratum, K, design_df = DESI
 
   list(V_pi = V_pi, se = sqrt(diag(V_pi)), V_eta = V_eta,
        em = em, em_pi = as.numeric(A_map %*% em$pi),
-       M_psu = M_psu, H_strata = H_strata, df_design = df_design,
-       c_corr = c_corr, t_crit = t_crit)
+       df_design = df_design, t_crit = qt(0.975, df_design))
 }
 
 # -----------------------------------------------------------------------------
@@ -465,8 +456,7 @@ run_one_sample <- function(sample_id) {
   gs <- godambe_sandwich(samp$Y, samp$w, rl$z_point_estimate, samp$psu_id, samp$stratum, K0)
 
   list(pi_hat = colMeans(rl$prev_draws), se = gs$se, t_crit = gs$t_crit,
-       V_pi = gs$V_pi, c_corr = gs$c_corr, df_design = gs$df_design,
-       M_psu = gs$M_psu, H_strata = gs$H_strata,
+       V_pi = gs$V_pi, df_design = gs$df_design,
        K_raw_active = rl$K_raw_active, K_hat_estimated = rl$K_hat_estimated,
        true_prevalence = TRUE_PREVALENCE,
        em_pi = gs$em_pi, em_converged = gs$em$converged,
@@ -495,7 +485,7 @@ run_and_save_sample <- function(sample_id) {
   }
 
   settings <- list(result_tag = RESULT_TAG, scenario = SCENARIO, merge = MERGE,
-                   threshold = THRESHOLD, design_df = DESIGN_DF,
+                   threshold = THRESHOLD,
                    seed = FIT_BASE_SEED + sample_id)
   t0 <- proc.time()
   result <- tryCatch(

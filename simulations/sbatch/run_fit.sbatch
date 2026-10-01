@@ -1,12 +1,11 @@
 #!/bin/bash
 # One array task = one replicate of src/R/dpmm_fit.R (see its header for the
 # method and options). Production defaults need no --export; arms differ by
-# MERGE / THRESHOLD / DESIGN_DF, and each lands under its own RESULT_TAG.
+# MERGE / THRESHOLD, and each lands under its own RESULT_TAG.
 #
 #   sbatch --array=1-1000 run_fit.sbatch                            # c0.3 (production)
 #   sbatch --array=1-1000 --export=ALL,MERGE=truth run_fit.sbatch   # c0.3_truth
 #   sbatch --array=1-1000 --export=ALL,THRESHOLD=0 run_fit.sbatch   # c0.3_nothresh
-#   sbatch --array=1-1000 --export=ALL,DESIGN_DF=0 run_fit.sbatch   # c0.3_nodf
 #
 # Measured per task: ~2 min, <1 GB.
 
@@ -21,7 +20,6 @@ export CLUSTER_C="${CLUSTER_C:-0.3}"
 export N_PSU="${N_PSU:-4}"
 export MERGE="${MERGE:-datadriven}"
 export THRESHOLD="${THRESHOLD:-1}"
-export DESIGN_DF="${DESIGN_DF:-1}"
 # Same BLAS kernels on every node type, so fits are reproducible across nodes.
 export OPENBLAS_CORETYPE=Haswell
 mkdir -p logs results .rcpp_cache

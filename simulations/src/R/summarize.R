@@ -71,7 +71,6 @@ summarize_arm <- function(tag) {
     k0_recovery_pct      = if (all(is.na(k_hat))) NA_real_ else 100 * mean(k_hat == K, na.rm = TRUE),
     mean_K_raw_active    = mean(get_num("K_raw_active")),
     mean_df_design       = mean(get_num("df_design")),
-    mean_c_corr          = mean(get_num("c_corr")),
     n_em_not_converged   = sum(get_num("em_converged") == 0, na.rm = TRUE),
     n_fallback_reps      = sum(get_num("n_dens_fallback") + get_num("n_sigma_fallback") > 0, na.rm = TRUE),
     n_outliers_0.10      = sum(worst_dev > 0.10),
