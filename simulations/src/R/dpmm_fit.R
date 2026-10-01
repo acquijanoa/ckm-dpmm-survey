@@ -3,14 +3,13 @@
 # (one SLURM array task) and save its calibrated phenotype prevalences.
 #
 #   1. fit_wdpmm              Gibbs sampler, L = 10 sparse components
-#   2. relabel_and_summarize  relabel draws, merge components into phenotypes
+#   2. summarize_phenotypes   merge components into phenotypes; prevalences
 #   3. godambe_sandwich       design-based SEs for the prevalences
 #
 # Options (environment variables; non-default values add a RESULT_TAG suffix):
 #   CLUSTER_C, N_PSU   scenario (0.3, 4)
 #   MERGE              datadriven (default) | truth
 #   THRESHOLD          1 (default) | 0   threshold consolidation
-#   N_ITER, N_BURNIN   MCMC iterations and burn-in (1500, 500)
 #   OUT_TAG            replaces RESULT_TAG (smoke tests)
 #
 # Summaries across replicates: summarize.R.
@@ -24,7 +23,6 @@ if (dir.exists(personal_lib) && !(personal_lib %in% .libPaths())) {
 suppressPackageStartupMessages({
   library(MASS)
   library(mvtnorm)
-  library(label.switching)
   library(Rcpp)
   library(RcppArmadillo)
 })
@@ -62,8 +60,6 @@ CLUSTER_C_STR <- Sys.getenv("CLUSTER_C", unset = "0.3")
 N_PSU_STR     <- Sys.getenv("N_PSU", unset = "4")
 MERGE         <- match.arg(Sys.getenv("MERGE", unset = "datadriven"), c("datadriven", "truth"))
 THRESHOLD     <- Sys.getenv("THRESHOLD", unset = "1") == "1" && MERGE == "datadriven"
-N_MCMC_ITER   <- as.integer(Sys.getenv("N_ITER", unset = "1500"))
-N_BURNIN      <- as.integer(Sys.getenv("N_BURNIN", unset = "500"))
 
 # Scenario tag c<C>[_npsu<N>]; the default 4 PSUs adds no suffix.
 SCENARIO <- sprintf("c%s", CLUSTER_C_STR)
@@ -71,9 +67,7 @@ if (N_PSU_STR != "4") SCENARIO <- paste0(SCENARIO, "_npsu", N_PSU_STR)
 
 # Production is the bare scenario tag; a suffix names each departure from it.
 RESULT_TAG <- paste0(SCENARIO,
-                     if (MERGE == "truth") "_truth" else if (!THRESHOLD) "_nothresh",
-                     if (N_MCMC_ITER != 1500L || N_BURNIN != 500L)
-                       sprintf("_it%db%d", N_MCMC_ITER, N_BURNIN))
+                     if (MERGE == "truth") "_truth" else if (!THRESHOLD) "_nothresh")
 OUT_TAG <- Sys.getenv("OUT_TAG", unset = "")
 if (nzchar(OUT_TAG)) RESULT_TAG <- OUT_TAG
 
@@ -86,6 +80,8 @@ SAMPLES_DIR <- file.path(PROJECT_ROOT, "data", sprintf("samples_%s", SCENARIO))
 L_TRUNC       <- 10
 ALPHA0_SPARSE <- 1
 SIGMA_FLOOR   <- 0.05
+N_MCMC_ITER   <- 1500
+N_BURNIN      <- 500
 FIT_BASE_SEED <- 20260930L   # replicate s uses FIT_BASE_SEED + s
 MERGE_MIN_WEIGHT <- 0.02     # threshold: minimum share of total weight
 MERGE_MIN_SEP    <- 1.5      # threshold: minimum centroid distance
@@ -107,7 +103,7 @@ floor_eigen <- function(Sigma, floor = SIGMA_FLOOR) {
 
 # Gibbs sampler: unweighted allocation; weights (summing to n) enter the
 # Dirichlet counts and the NIW sufficient statistics. Returns the kept
-# allocations and the last iteration's component parameters.
+# allocations.
 fit_wdpmm <- function(Y, w, L = L_TRUNC, n_iter = N_MCMC_ITER, n_burnin = N_BURNIN,
                        alpha0 = ALPHA0_SPARSE, kappa0 = 0.5, nu0 = P_DIM + 2) {
   n <- nrow(Y); p <- ncol(Y)
@@ -170,12 +166,12 @@ fit_wdpmm <- function(Y, w, L = L_TRUNC, n_iter = N_MCMC_ITER, n_burnin = N_BURN
       z_draws[draw_i, ] <- z
     }
   }
-  list(z_draws = z_draws, mu_k = mu_k, Sigma_k = Sigma_k,
+  list(z_draws = z_draws,
        n_dens_fallback = n_dens_fallback, n_sigma_fallback = n_sigma_fallback)
 }
 
 # -----------------------------------------------------------------------------
-# 2. Relabeling, merging, phenotype densities
+# 2. Phenotypes and prevalences
 # -----------------------------------------------------------------------------
 weighted_centroid <- function(Y, w, idx) {
   if (length(idx) == 0) return(rep(1e6, ncol(Y)))  # empty: never the nearest
@@ -214,10 +210,9 @@ merge_small_close_groups <- function(z, Y, w, min_weight_frac, min_sep) {
   match(z, sort(unique(z)))
 }
 
-# Label G groups by true phenotype: each phenotype takes its nearest
-# unassigned group; leftover groups join their nearest phenotype. For
-# MERGE = "truth" this is the merge itself; for "datadriven" it only names
-# the estimated groups so they can be scored.
+# Label G estimated groups by true phenotype, for scoring: each phenotype
+# takes its nearest unassigned group; leftover groups join their nearest
+# phenotype.
 align_groups_to_truth <- function(centroids) {
   G <- nrow(centroids)
   cost <- sapply(seq_len(K0), function(j) sqrt(colSums((t(centroids) - MU0_LIST[[j]])^2)))
@@ -239,123 +234,82 @@ align_groups_to_truth <- function(centroids) {
   group_to_pheno
 }
 
-relabel_and_summarize <- function(fit, w, Y, K_active_min, coverage = 0.99) {
+# Merge the raw components into phenotypes and summarize the draws.
+#   datadriven: the units are partitioned into groups from the posterior
+#               similarity matrix (plus threshold consolidation); in every
+#               draw each component joins the group holding most of its weight.
+#   truth:      in every draw each component joins the nearest true centroid.
+# Each draw then gives every unit a phenotype, from which come the draw's
+# prevalences and each phenotype's weighted mean and covariance. Returns the
+# prevalence draws and the posterior means (pi, mu, Sigma) per phenotype.
+summarize_phenotypes <- function(fit, w, Y) {
   z_draws <- fit$z_draws
-  occ_sorted <- sort(table(z_draws), decreasing = TRUE)
-  cum_frac <- cumsum(occ_sorted) / sum(occ_sorted)
-  K_active <- max(K_active_min, min(which(cum_frac >= coverage)))
-  K_active <- min(K_active, length(occ_sorted))
-  top_k <- as.integer(names(occ_sorted)[seq_len(K_active)])
-  remap <- setNames(seq_along(top_k), top_k)
+  m <- nrow(z_draws); n <- ncol(z_draws); p <- ncol(Y)
 
-  # Labels outside the 99%-occupancy set join their nearest active label
-  # (by weighted centroid over the whole chain), so no draw is discarded.
-  all_labels <- as.integer(names(occ_sorted))
-  inactive_labels <- setdiff(all_labels, top_k)
-  if (length(inactive_labels) > 0) {
-    pooled_centroid <- function(ell) {
-      cnt_w <- colSums(z_draws == ell) * w
-      colSums(Y * cnt_w) / sum(cnt_w)
-    }
-    top_k_mu <- do.call(rbind, lapply(top_k, pooled_centroid))
-    nearest_top_k <- sapply(inactive_labels, function(ell) {
-      d <- sqrt(rowSums(sweep(top_k_mu, 2, pooled_centroid(ell))^2))
-      top_k[which.min(d)]
-    })
-    remap <- c(remap, setNames(remap[as.character(nearest_top_k)], inactive_labels))
-  }
-  # Collapsed labels 1..K_active; collapsed label c is raw label top_k[c].
-  class_mat <- matrix(as.integer(remap[as.character(z_draws)]), nrow(z_draws), ncol(z_draws))
-
-  m <- nrow(class_mat); n <- ncol(class_mat)
-  p_alloc <- array(0, dim = c(m, n, K_active))
-  for (i in seq_len(m)) {
-    for (k in seq_len(K_active)) p_alloc[i, , k] <- as.numeric(class_mat[i, ] == k)
-  }
-  perm <- label.switching::stephens(p_alloc)$permutations
-
-  # Stephens relabeling: collapsed c becomes order(perm)[c]
-  # (label.switching's convention). Prevalence draws per relabeled component.
-  prev_draws <- matrix(NA_real_, m, K_active)
-  for (i in seq_len(m)) {
-    z_relab <- order(perm[i, ])[class_mat[i, ]]
-    prev_draws[i, ] <- vapply(seq_len(K_active), function(k) sum(w[z_relab == k]), 0) / sum(w)
-  }
-  z_relabeled_last <- z_relab
-
-  # Merge components into phenotypes.
   if (MERGE == "datadriven") {
-    # Partition point estimate from the posterior similarity matrix.
-    z_hat <- as.integer(mcclust::maxpear(mcclust::comp.psm(class_mat))$cl)
+    z_hat <- as.integer(mcclust::maxpear(mcclust::comp.psm(z_draws))$cl)
     z_hat <- match(z_hat, sort(unique(z_hat)))
     if (THRESHOLD) {
       z_hat <- merge_small_close_groups(z_hat, Y, w, MERGE_MIN_WEIGHT, MERGE_MIN_SEP)
     }
     K_hat <- max(z_hat)
-    # Each component joins the group holding most of its last-draw units.
-    comp_to_group <- sapply(seq_len(K_active), function(k) {
-      idx <- which(z_relabeled_last == k)
-      if (length(idx) == 0) return(1L)
-      tab <- table(z_hat[idx])
-      as.integer(names(tab)[which.max(tab)])
-    })
     group_centroids <- t(sapply(seq_len(K_hat), function(g) weighted_centroid(Y, w, which(z_hat == g))))
     group_to_pheno <- align_groups_to_truth(matrix(group_centroids, K_hat))
-    component_to_phenotype <- group_to_pheno[comp_to_group]
+    group_w <- w * outer(z_hat, seq_len(K_hat), "==")
   } else {
-    comp_centroids <- t(sapply(seq_len(K_active), function(k) weighted_centroid(Y, w, which(z_relabeled_last == k))))
-    component_to_phenotype <- align_groups_to_truth(comp_centroids)
     K_hat <- NA_integer_
+    truth_mu <- do.call(rbind, MU0_LIST)
   }
 
-  prev_draws_aligned <- matrix(0, m, K0)
-  for (k in seq_len(K_active)) {
-    j <- component_to_phenotype[k]
-    prev_draws_aligned[, j] <- prev_draws_aligned[, j] + prev_draws[, k]
-  }
-  z_point_aligned <- component_to_phenotype[z_relabeled_last]
+  wY  <- w * Y
+  a   <- rep(seq_len(p), p); b <- rep(seq_len(p), each = p)
+  wYY <- w * Y[, a] * Y[, b]
+  prev_draws <- matrix(0, m, K0)
+  pheno_draws <- matrix(0L, m, n)
+  mu_sum <- matrix(0, K0, p); S_sum <- matrix(0, K0, p * p); n_present <- integer(K0)
 
-  list(prev_draws = prev_draws_aligned, z_point_estimate = as.integer(z_point_aligned),
-       K_raw_active = K_active, K_hat_estimated = K_hat)
+  for (i in seq_len(m)) {
+    z <- z_draws[i, ]
+    # Phenotype of each component present in this draw (rows in label order).
+    if (MERGE == "datadriven") {
+      comp_pheno <- group_to_pheno[max.col(rowsum(group_w, z), ties.method = "first")]
+    } else {
+      cen <- rowsum(wY, z) / as.numeric(rowsum(w, z))
+      comp_pheno <- apply(cen, 1, function(x) which.min(colSums((t(truth_mu) - x)^2)))
+    }
+    ph <- comp_pheno[match(z, sort(unique(z)))]
+    pheno_draws[i, ] <- ph
+
+    s0 <- rowsum(w, ph)
+    js <- as.integer(rownames(s0)); s0 <- as.numeric(s0)
+    mu <- rowsum(wY, ph) / s0
+    S  <- rowsum(wYY, ph) / s0 - mu[, a, drop = FALSE] * mu[, b, drop = FALSE]
+    prev_draws[i, js] <- s0 / sum(w)
+    mu_sum[js, ] <- mu_sum[js, ] + mu
+    S_sum[js, ]  <- S_sum[js, ] + S
+    n_present[js] <- n_present[js] + 1L
+  }
+
+  present <- which(n_present > 0)
+  occ <- sort(table(z_draws), decreasing = TRUE)
+  list(prev_draws = prev_draws,
+       pi = colMeans(prev_draws), present = present,
+       mu = lapply(present, function(j) mu_sum[j, ] / n_present[j]),
+       Sigma = lapply(present, function(j) matrix(S_sum[j, ] / n_present[j], p, p)),
+       z_point_estimate = apply(pheno_draws, 2, function(x) which.max(tabulate(x, K0))),
+       K_hat_estimated = K_hat,
+       K_raw_active = min(which(cumsum(occ) / sum(occ) >= 0.99)))
 }
 
 # -----------------------------------------------------------------------------
 # 3. Design-based variance
 # -----------------------------------------------------------------------------
-# Weighted EM for a G-component Gaussian mixture from a hard partition z0.
-# Converges to the weighted pseudo-MLE, the estimate the sampler targets.
-weighted_em <- function(Y, w, z0, max_iter = 500, tol = 1e-10) {
-  G <- max(z0); n <- nrow(Y)
-  R <- matrix(0, n, G); R[cbind(seq_len(n), z0)] <- 1
-  ll_old <- -Inf
-  for (it in seq_len(max_iter)) {
-    wr <- R * w
-    nk <- colSums(wr)
-    pi_g <- nk / sum(w)
-    mu <- lapply(seq_len(G), function(g) colSums(Y * wr[, g]) / nk[g])
-    Sig <- lapply(seq_len(G), function(g) {
-      d <- sweep(Y, 2, mu[[g]])
-      crossprod(d * sqrt(wr[, g])) / nk[g]
-    })
-    logphi <- sapply(seq_len(G), function(g) mvtnorm::dmvnorm(Y, mu[[g]], Sig[[g]], log = TRUE))
-    lp <- sweep(logphi, 2, log(pi_g), "+")
-    lmax <- apply(lp, 1, max)
-    log_m <- lmax + log(rowSums(exp(lp - lmax)))
-    R <- exp(lp - log_m)
-    ll <- sum(w * log_m)
-    if (abs(ll - ll_old) < tol * (1 + abs(ll))) break
-    ll_old <- ll
-  }
-  list(pi = pi_g, mu = mu, Sigma = Sig, loglik = ll, n_iter = it,
-       converged = it < max_iter)
-}
-
 # eta = (pi_1..pi_{G-1}, then per g: mu_g, vech(Sigma_g)), pi_G = 1 - sum.
-pack_eta <- function(em) {
-  p <- length(em$mu[[1]])
+pack_eta <- function(pi, mu, Sigma) {
+  p <- length(mu[[1]])
   lt <- which(lower.tri(diag(p), diag = TRUE))
-  G <- length(em$pi)
-  c(em$pi[-G], unlist(lapply(seq_len(G), function(g) c(em$mu[[g]], em$Sigma[[g]][lt]))))
+  G <- length(pi)
+  c(pi[-G], unlist(lapply(seq_len(G), function(g) c(mu[[g]], Sigma[[g]][lt]))))
 }
 
 # Unit scores w_i grad_eta log m_i(eta) (n x d):
@@ -398,18 +352,17 @@ unit_scores <- function(eta, Y, w, G) {
 }
 
 # Godambe sandwich V = H^{-1} J H^{-1} for eta = (pi, mu, Sigma) of the
-# weighted Gaussian mixture with one component per phenotype, started from
-# the phenotype partition z_pheno. H is the numerical Jacobian of the score,
-# J the delete-one-PSU jackknife of the PSU score totals. Returns the K x K
-# prevalence covariance and SEs, and the t critical value on M - H degrees of
-# freedom (sampled PSUs minus strata).
-godambe_sandwich <- function(Y, w, z_pheno, psu_id, stratum, K) {
-  keep <- sort(unique(z_pheno))
+# weighted Gaussian mixture with one component per phenotype, evaluated at
+# the posterior means in ph (from summarize_phenotypes). H is the numerical
+# Jacobian of the score, J the delete-one-PSU jackknife of the PSU score
+# totals. Returns the K x K prevalence covariance and SEs, and the t critical
+# value on M - H degrees of freedom (sampled PSUs minus strata).
+godambe_sandwich <- function(Y, w, ph, psu_id, stratum, K) {
+  keep <- ph$present
   G <- length(keep)
   if (G < 2) stop("fewer than two phenotypes in the partition")
 
-  em <- weighted_em(Y, w, match(z_pheno, keep))
-  eta <- pack_eta(em)
+  eta <- pack_eta(ph$pi[keep], ph$mu, ph$Sigma)
   d <- length(eta)
 
   score_total <- function(e) colSums(unit_scores(e, Y, w, G))
@@ -442,7 +395,6 @@ godambe_sandwich <- function(Y, w, z_pheno, psu_id, stratum, K) {
   V_pi <- A_map %*% V_group %*% t(A_map)
 
   list(V_pi = V_pi, se = sqrt(diag(V_pi)), V_eta = V_eta,
-       em = em, em_pi = as.numeric(A_map %*% em$pi),
        df_design = df_design, t_crit = qt(0.975, df_design))
 }
 
@@ -455,18 +407,16 @@ run_one_sample <- function(sample_id) {
   # Same seed in every arm, so arms share the chain for each sample.
   set.seed(FIT_BASE_SEED + sample_id)
   fit <- fit_wdpmm(samp$Y, samp$w)
-  rl <- relabel_and_summarize(fit, samp$w, samp$Y, K_active_min = K0 + 2)
-  gs <- godambe_sandwich(samp$Y, samp$w, rl$z_point_estimate, samp$psu_id, samp$stratum, K0)
+  ph <- summarize_phenotypes(fit, samp$w, samp$Y)
+  gs <- godambe_sandwich(samp$Y, samp$w, ph, samp$psu_id, samp$stratum, K0)
 
-  list(pi_hat = colMeans(rl$prev_draws), se = gs$se, t_crit = gs$t_crit,
+  list(pi_hat = ph$pi, se = gs$se, t_crit = gs$t_crit,
        V_pi = gs$V_pi, df_design = gs$df_design,
-       K_raw_active = rl$K_raw_active, K_hat_estimated = rl$K_hat_estimated,
+       K_raw_active = ph$K_raw_active, K_hat_estimated = ph$K_hat_estimated,
        true_prevalence = TRUE_PREVALENCE,
-       em_pi = gs$em_pi, em_converged = gs$em$converged,
        n_dens_fallback = fit$n_dens_fallback, n_sigma_fallback = fit$n_sigma_fallback,
-       posterior = list(prev_draws = rl$prev_draws, z_point_estimate = rl$z_point_estimate,
-                        mu_k = fit$mu_k, Sigma_k = fit$Sigma_k,
-                        em = gs$em, V_eta = gs$V_eta))
+       posterior = list(prev_draws = ph$prev_draws, z_point_estimate = ph$z_point_estimate,
+                        mu = ph$mu, Sigma = ph$Sigma, V_eta = gs$V_eta))
 }
 
 # results/: one small file per replicate and arm; posteriors_<tag>/: the
@@ -488,7 +438,7 @@ run_and_save_sample <- function(sample_id) {
   }
 
   settings <- list(result_tag = RESULT_TAG, scenario = SCENARIO, merge = MERGE,
-                   threshold = THRESHOLD, n_iter = N_MCMC_ITER, n_burnin = N_BURNIN,
+                   threshold = THRESHOLD,
                    seed = FIT_BASE_SEED + sample_id)
   t0 <- proc.time()
   result <- tryCatch(

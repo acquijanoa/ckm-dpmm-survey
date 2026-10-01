@@ -71,7 +71,6 @@ summarize_arm <- function(tag) {
     k0_recovery_pct      = if (all(is.na(k_hat))) NA_real_ else 100 * mean(k_hat == K, na.rm = TRUE),
     mean_K_raw_active    = mean(get_num("K_raw_active")),
     mean_df_design       = mean(get_num("df_design")),
-    n_em_not_converged   = sum(get_num("em_converged") == 0, na.rm = TRUE),
     n_fallback_reps      = sum(get_num("n_dens_fallback") + get_num("n_sigma_fallback") > 0, na.rm = TRUE),
     n_outliers_0.10      = sum(worst_dev > 0.10),
     mean_coverage_pct    = mean(tbl$coverage_pct)
@@ -88,8 +87,8 @@ print_summary <- function(s) {
               s$arm_tag, s$n_completed, s$n_errors,
               if (is.na(s$k0_recovery_pct)) "n/a" else sprintf("%.1f%%", s$k0_recovery_pct),
               s$mean_coverage_pct))
-  cat(sprintf("   outliers(>0.10)=%d, EM not converged=%d, reps with fallbacks=%d\n",
-              s$n_outliers_0.10, s$n_em_not_converged, s$n_fallback_reps))
+  cat(sprintf("   outliers(>0.10)=%d, reps with fallbacks=%d\n",
+              s$n_outliers_0.10, s$n_fallback_reps))
   print(format(s$table, digits = 3), row.names = FALSE)
 }
 
