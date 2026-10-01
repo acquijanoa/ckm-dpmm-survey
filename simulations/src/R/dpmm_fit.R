@@ -6,7 +6,7 @@
 #   2. relabel_and_summarize  relabel draws, merge components into phenotypes
 #   3. godambe_sandwich       design-based SEs for the prevalences
 #
-# Options (environment variables, each reflected in RESULT_TAG):
+# Options (environment variables; non-default values add a RESULT_TAG suffix):
 #   CLUSTER_C, N_PSU   scenario (0.3, 4)
 #   MERGE              datadriven (default) | truth
 #   THRESHOLD          1 (default) | 0   threshold consolidation
@@ -68,9 +68,10 @@ DESIGN_DF     <- Sys.getenv("DESIGN_DF", unset = "1") == "1"
 SCENARIO <- sprintf("c%s", CLUSTER_C_STR)
 if (N_PSU_STR != "4") SCENARIO <- paste0(SCENARIO, "_npsu", N_PSU_STR)
 
-RESULT_TAG <- paste0(SCENARIO, "_", MERGE,
-                     if (THRESHOLD) "_thresh",
-                     if (DESIGN_DF) "_df")
+# Production is the bare scenario tag; a suffix names each departure from it.
+RESULT_TAG <- paste0(SCENARIO,
+                     if (MERGE == "truth") "_truth" else if (!THRESHOLD) "_nothresh",
+                     if (!DESIGN_DF) "_nodf")
 OUT_TAG <- Sys.getenv("OUT_TAG", unset = "")
 if (nzchar(OUT_TAG)) RESULT_TAG <- OUT_TAG
 
