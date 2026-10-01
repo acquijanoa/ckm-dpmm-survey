@@ -5,8 +5,8 @@
 #   Rscript src/R/summarize.R <tag> [<tag>]   # named arms
 #
 # Per phenotype: bias, empirical vs. estimated SE, coverage of the truth and
-# of the across-replicate mean (centered coverage). Intervals are the 2.5% and
-# 97.5% quantiles of the adjusted draws, widened by t_crit / z_0.975.
+# of the across-replicate mean (centered coverage). Intervals are
+# pi_hat +/- t_crit * se.
 # =============================================================================
 
 get_project_root <- function() {
@@ -28,17 +28,6 @@ list_tags <- function() {
   unique(sub("^result_(.*)_[0-9]+\\.rds$", "\\1", f))
 }
 
-# 95% interval per phenotype; the last phenotype is 1 - sum of the others.
-replicate_interval <- function(r) {
-  adj <- r$adjusted_draws
-  all_draws <- cbind(adj, 1 - rowSums(adj))
-  pi_hat <- r$pi_hat
-  scale <- r$t_crit / qnorm(0.975)
-  lo <- apply(all_draws, 2, quantile, probs = 0.025)
-  hi <- apply(all_draws, 2, quantile, probs = 0.975)
-  rbind(lo = pi_hat - (pi_hat - lo) * scale, hi = pi_hat + (hi - pi_hat) * scale)
-}
-
 summarize_arm <- function(tag) {
   files <- result_files(tag)
   if (length(files) == 0) stop("No result files for arm ", tag)
@@ -47,16 +36,17 @@ summarize_arm <- function(tag) {
 
   pi_mat <- do.call(rbind, lapply(rs, `[[`, "pi_hat"))
   truth  <- colMeans(do.call(rbind, lapply(rs, `[[`, "true_prevalence")))
-  ci     <- lapply(rs, replicate_interval)
-  lo     <- do.call(rbind, lapply(ci, function(x) x["lo", ]))
-  hi     <- do.call(rbind, lapply(ci, function(x) x["hi", ]))
+  se_mat <- do.call(rbind, lapply(rs, `[[`, "se"))
+  half   <- se_mat * vapply(rs, `[[`, 0, "t_crit")
+  lo     <- pi_mat - half
+  hi     <- pi_mat + half
   pi_bar <- colMeans(pi_mat)
 
   covers <- function(target) {
     colMeans(sweep(lo, 2, target, "<=") & sweep(hi, 2, target, ">="))
   }
   emp_se <- apply(pi_mat, 2, sd)
-  est_se <- colMeans(hi - lo) / (2 * qnorm(0.975))
+  est_se <- colMeans(se_mat)
 
   tbl <- data.frame(
     phenotype           = seq_len(K),
@@ -82,7 +72,7 @@ summarize_arm <- function(tag) {
     mean_K_raw_active    = mean(get_num("K_raw_active")),
     mean_df_design       = mean(get_num("df_design")),
     mean_c_corr          = mean(get_num("c_corr")),
-    min_a_mat_agreement  = min(get_num("a_mat_agreement"), na.rm = TRUE),
+    n_em_not_converged   = sum(get_num("em_converged") == 0, na.rm = TRUE),
     n_fallback_reps      = sum(get_num("n_dens_fallback") + get_num("n_sigma_fallback") > 0, na.rm = TRUE),
     n_outliers_0.10      = sum(worst_dev > 0.10),
     mean_coverage_pct    = mean(tbl$coverage_pct)
@@ -99,8 +89,8 @@ print_summary <- function(s) {
               s$arm_tag, s$n_completed, s$n_errors,
               if (is.na(s$k0_recovery_pct)) "n/a" else sprintf("%.1f%%", s$k0_recovery_pct),
               s$mean_coverage_pct))
-  cat(sprintf("   outliers(>0.10)=%d, min a_mat agreement=%.3f, reps with fallbacks=%d\n",
-              s$n_outliers_0.10, s$min_a_mat_agreement, s$n_fallback_reps))
+  cat(sprintf("   outliers(>0.10)=%d, EM not converged=%d, reps with fallbacks=%d\n",
+              s$n_outliers_0.10, s$n_em_not_converged, s$n_fallback_reps))
   print(format(s$table, digits = 3), row.names = FALSE)
 }
 

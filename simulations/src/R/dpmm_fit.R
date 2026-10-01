@@ -4,15 +4,13 @@
 #
 #   1. fit_wdpmm              Gibbs sampler, L = 10 sparse components
 #   2. relabel_and_summarize  relabel draws, merge components into phenotypes
-#   3. sandwich_correct_prevalence
-#                             Godambe sandwich + Williams & Savitsky rotation
+#   3. godambe_sandwich       design-based SEs for the prevalences
 #
 # Options (environment variables, each reflected in RESULT_TAG):
 #   CLUSTER_C, N_PSU   scenario (0.3, 4)
 #   MERGE              datadriven (default) | truth
 #   THRESHOLD          1 (default) | 0   threshold consolidation
 #   DESIGN_DF          1 (default) | 0   design-df correction
-#   JOINT              0 (default) | 1   full (pi, mu, Sigma) sandwich target
 #   OUT_TAG            replaces RESULT_TAG (smoke tests)
 #
 # Summaries across replicates: summarize.R.
@@ -65,7 +63,6 @@ N_PSU_STR     <- Sys.getenv("N_PSU", unset = "4")
 MERGE         <- match.arg(Sys.getenv("MERGE", unset = "datadriven"), c("datadriven", "truth"))
 THRESHOLD     <- Sys.getenv("THRESHOLD", unset = "1") == "1" && MERGE == "datadriven"
 DESIGN_DF     <- Sys.getenv("DESIGN_DF", unset = "1") == "1"
-JOINT         <- Sys.getenv("JOINT", unset = "0") == "1"
 
 # Scenario tag c<C>[_npsu<N>]; the default 4 PSUs adds no suffix.
 SCENARIO <- sprintf("c%s", CLUSTER_C_STR)
@@ -73,8 +70,7 @@ if (N_PSU_STR != "4") SCENARIO <- paste0(SCENARIO, "_npsu", N_PSU_STR)
 
 RESULT_TAG <- paste0(SCENARIO, "_", MERGE,
                      if (THRESHOLD) "_thresh",
-                     if (DESIGN_DF) "_df",
-                     if (JOINT) "_joint")
+                     if (DESIGN_DF) "_df")
 OUT_TAG <- Sys.getenv("OUT_TAG", unset = "")
 if (nzchar(OUT_TAG)) RESULT_TAG <- OUT_TAG
 
@@ -305,7 +301,6 @@ relabel_and_summarize <- function(fit, w, Y, K_active_min, coverage = 0.99) {
     group_centroids <- t(sapply(seq_len(K_hat), function(g) weighted_centroid(Y, w, which(z_hat == g))))
     group_to_pheno <- align_groups_to_truth(matrix(group_centroids, K_hat))
     component_to_phenotype <- group_to_pheno[comp_to_group]
-    z_group <- z_hat
   } else {
     comp_centroids <- t(sapply(seq_len(K_active), function(k) weighted_centroid(Y, w, which(z_relabeled_last == k))))
     component_to_phenotype <- align_groups_to_truth(comp_centroids)
@@ -318,37 +313,13 @@ relabel_and_summarize <- function(fit, w, Y, K_active_min, coverage = 0.99) {
     prev_draws_aligned[, j] <- prev_draws_aligned[, j] + prev_draws[, k]
   }
   z_point_aligned <- component_to_phenotype[z_relabeled_last]
-  # Starting partition for JOINT's weighted EM.
-  if (MERGE == "truth") {
-    z_group <- as.integer(z_point_aligned)
-    group_to_pheno <- seq_len(K0)
-  }
-
-  # a_ij: density of phenotype j at Y_i, the mixture of the fitted
-  # components merged into j, with last-draw weights. Relabeled component k
-  # maps to collapsed label perm[m, k] and raw label top_k[perm[m, k]].
-  z_coll_last <- class_mat[m, ]
-  coll_w <- vapply(seq_len(K_active), function(c) sum(w[z_coll_last == c]), 0)
-  a_mat <- matrix(0, n, K0)
-  for (j in seq_len(K0)) {
-    coll_idx_j <- perm[m, which(component_to_phenotype == j)]
-    wj <- coll_w[coll_idx_j]
-    if (sum(wj) <= 0) wj <- rep(1, length(wj))
-    wj <- wj / sum(wj)
-    for (t in seq_along(coll_idx_j)) {
-      ell <- top_k[coll_idx_j[t]]
-      a_mat[, j] <- a_mat[, j] + wj[t] * mvtnorm::dmvnorm(Y, mean = fit$mu_k[[ell]], sigma = fit$Sigma_k[[ell]])
-    }
-  }
 
   list(prev_draws = prev_draws_aligned, z_point_estimate = as.integer(z_point_aligned),
-       K_raw_active = K_active, a_mat = a_mat,
-       z_group = z_group, group_to_pheno = group_to_pheno,
-       K_hat_estimated = K_hat)
+       K_raw_active = K_active, K_hat_estimated = K_hat)
 }
 
 # -----------------------------------------------------------------------------
-# 3. Variance correction
+# 3. Design-based variance
 # -----------------------------------------------------------------------------
 # Weighted EM for a G-component Gaussian mixture from a hard partition z0.
 # Converges to the weighted pseudo-MLE, the estimate the sampler targets.
@@ -391,7 +362,7 @@ pack_eta <- function(em) {
 #   mu_g:      r_ig Sigma_g^{-1}(Y_i - mu_g)
 #   Sigma_ab:  r_ig 0.5[D_a D_b - (Sigma_g^{-1})_ab], doubled off-diagonal,
 #              with D = Sigma_g^{-1}(Y_i - mu_g)
-joint_unit_scores <- function(eta, Y, w, G) {
+unit_scores <- function(eta, Y, w, G) {
   n <- nrow(Y); p <- ncol(Y)
   lt <- which(lower.tri(diag(p), diag = TRUE)); q <- length(lt)
   lt_row <- row(diag(p))[lt]; lt_col <- col(diag(p))[lt]
@@ -425,22 +396,22 @@ joint_unit_scores <- function(eta, Y, w, G) {
   do.call(cbind, blocks) * w
 }
 
-# Full-eta Godambe sandwich V = H^{-1} J H^{-1} (H by numerical Jacobian of
-# the score, J by PSU jackknife). Returns its prevalence block on the first
-# K_out - 1 phenotypes.
-joint_sandwich <- function(Y, w, z_group, group_to_pheno, psu_id,
-                           stratum_psu_indices, K_out, c_corr) {
-  keep <- sort(unique(z_group))
-  z0 <- match(z_group, keep)
-  g2p <- group_to_pheno[keep]
+# Godambe sandwich V = H^{-1} J H^{-1} for eta = (pi, mu, Sigma) of the
+# weighted Gaussian mixture with one component per phenotype, started from
+# the phenotype partition z_pheno. H is the numerical Jacobian of the score,
+# J the delete-one-PSU jackknife of the PSU score totals. Returns the K x K
+# prevalence covariance and SEs. With design_df, V is scaled by M/(M - H)
+# and intervals use t_{M-H}.
+godambe_sandwich <- function(Y, w, z_pheno, psu_id, stratum, K, design_df = DESIGN_DF) {
+  keep <- sort(unique(z_pheno))
   G <- length(keep)
-  if (G < 2) return(NULL)
+  if (G < 2) stop("fewer than two phenotypes in the partition")
 
-  em <- weighted_em(Y, w, z0)
+  em <- weighted_em(Y, w, match(z_pheno, keep))
   eta <- pack_eta(em)
   d <- length(eta)
 
-  score_total <- function(e) colSums(joint_unit_scores(e, Y, w, G))
+  score_total <- function(e) colSums(unit_scores(e, Y, w, G))
   jac <- matrix(0, d, d)
   for (j in seq_len(d)) {
     h <- 1e-5 * max(1, abs(eta[j]))
@@ -450,92 +421,34 @@ joint_sandwich <- function(Y, w, z_group, group_to_pheno, psu_id,
   }
   H_hat <- -(jac + t(jac)) / 2
 
-  unit_scores <- joint_unit_scores(eta, Y, w, G)
-  psu_scores <- rowsum(unit_scores, psu_id, reorder = FALSE)
-  J_hat <- jackknife_sandwich_cpp(psu_scores, stratum_psu_indices)
-
-  H_inv <- tryCatch(solve(H_hat), error = function(e) MASS::ginv(H_hat))
-  V_eta <- c_corr * H_inv %*% J_hat %*% H_inv
-
-  V_pp <- V_eta[seq_len(G - 1), seq_len(G - 1), drop = FALSE]
-  B <- rbind(diag(G - 1), -1)
-  V_group <- B %*% V_pp %*% t(B)
-  A_map <- matrix(0, K_out, G)
-  A_map[cbind(g2p, seq_len(G))] <- 1
-  V_pheno <- A_map %*% V_group %*% t(A_map)
-
-  list(Sigma_joint = V_pheno[seq_len(K_out - 1), seq_len(K_out - 1), drop = FALSE],
-       V_eta = V_eta, H_cond = kappa(H_hat, exact = FALSE),
-       em_pi_pheno = as.numeric(A_map %*% em$pi),
-       em_converged = em$converged, em_n_iter = em$n_iter, G = G)
-}
-
-# Godambe sandwich on the K - 1 free prevalences from the phenotype
-# densities a_mat:
-#   m_i = sum_j pi_j a_ij,   s_ik = w_i (a_ik - a_iK)/m_i,
-#   H_kl = sum_i w_i (a_ik - a_iK)(a_il - a_iK)/m_i^2,
-# J by PSU jackknife. The draws are then rotated (Williams & Savitsky) to
-# have covariance Sigma_sandwich + Sigma_naive.
-sandwich_correct_prevalence <- function(prev_draws, w, psu_id, stratum, a_mat,
-                                         design_df = DESIGN_DF, joint = JOINT,
-                                         Y = NULL, z_group = NULL, group_to_pheno = NULL) {
-  K <- ncol(prev_draws)
-  Kd <- K - 1
-  pi_full <- colMeans(prev_draws)
-
-  m_i <- pmax(as.numeric(a_mat %*% pi_full), 1e-300)
-  a_diff <- a_mat[, seq_len(Kd), drop = FALSE] - a_mat[, K]
-  unit_scores <- w * (a_diff / m_i)
-  H_hat <- crossprod(a_diff * sqrt(w) / m_i)
-
   # PSU score totals, and each stratum's PSU rows (0-based).
   unique_psus <- unique(psu_id)
-  psu_scores <- rowsum(unit_scores, psu_id, reorder = FALSE)
+  psu_scores <- rowsum(unit_scores(eta, Y, w, G), psu_id, reorder = FALSE)
   stratum_psu_indices <- lapply(unique(stratum), function(h) {
     match(unique(psu_id[stratum == h]), unique_psus) - 1L
   })
   J_hat <- jackknife_sandwich_cpp(psu_scores, stratum_psu_indices)
 
-  H_inv <- solve(H_hat + diag(1e-8, Kd))
-  Sigma_sandwich_raw <- H_inv %*% J_hat %*% H_inv
-
-  # Design-df correction, df = M - H: scale by M/df; summarize.R widens
-  # intervals by t_df/z using t_crit.
   M_psu <- length(unique_psus)
   H_strata <- length(unique(stratum))
   df_design <- max(M_psu - H_strata, 1)
-  if (design_df) {
-    c_corr <- M_psu / df_design
-    t_crit <- qt(0.975, df_design)
-  } else {
-    c_corr <- 1
-    t_crit <- qnorm(0.975)
-  }
-  Sigma_sandwich <- Sigma_sandwich_raw * c_corr
+  c_corr <- if (design_df) M_psu / df_design else 1
+  t_crit <- if (design_df) qt(0.975, df_design) else qnorm(0.975)
 
-  draws_reduced <- prev_draws[, -K, drop = FALSE]
-  draws_centered <- sweep(draws_reduced, 2, colMeans(draws_reduced))
-  Sigma_naive <- cov(draws_reduced)
+  H_inv <- solve(H_hat)
+  V_eta <- c_corr * H_inv %*% J_hat %*% H_inv
 
-  Sigma_corrected <- Sigma_sandwich + Sigma_naive
+  # Prevalence block -> all G components (pi_G = 1 - sum) -> K phenotypes.
+  B <- rbind(diag(G - 1), -1)
+  V_group <- B %*% V_eta[seq_len(G - 1), seq_len(G - 1), drop = FALSE] %*% t(B)
+  A_map <- matrix(0, K, G)
+  A_map[cbind(keep, seq_len(G))] <- 1
+  V_pi <- A_map %*% V_group %*% t(A_map)
 
-  js <- NULL
-  if (joint) {
-    js <- joint_sandwich(Y, w, z_group, group_to_pheno, psu_id,
-                         stratum_psu_indices, K, c_corr)
-    if (!is.null(js)) Sigma_corrected <- js$Sigma_joint
-  }
-
-  R1 <- tryCatch(chol(Sigma_corrected), error = function(e) chol(Sigma_corrected + diag(1e-6, Kd)))
-  R2 <- tryCatch(chol(Sigma_naive), error = function(e) chol(Sigma_naive + diag(1e-6, Kd)))
-  rotated <- draws_centered %*% solve(R2) %*% R1
-  adjusted_draws <- sweep(rotated, 2, colMeans(draws_reduced), "+")
-
-  list(pi_hat = pi_full, adjusted_draws = adjusted_draws,
-       Sigma_sandwich = Sigma_sandwich, Sigma_sandwich_raw = Sigma_sandwich_raw,
-       Sigma_naive = Sigma_naive, Sigma_corrected = Sigma_corrected,
+  list(V_pi = V_pi, se = sqrt(diag(V_pi)), V_eta = V_eta,
+       em = em, em_pi = as.numeric(A_map %*% em$pi),
        M_psu = M_psu, H_strata = H_strata, df_design = df_design,
-       c_corr = c_corr, t_crit = t_crit, joint = js)
+       c_corr = c_corr, t_crit = t_crit)
 }
 
 # -----------------------------------------------------------------------------
@@ -548,28 +461,18 @@ run_one_sample <- function(sample_id) {
   set.seed(FIT_BASE_SEED + sample_id)
   fit <- fit_wdpmm(samp$Y, samp$w)
   rl <- relabel_and_summarize(fit, samp$w, samp$Y, K_active_min = K0 + 2)
-  sw <- sandwich_correct_prevalence(rl$prev_draws, samp$w, samp$psu_id, samp$stratum,
-                                     rl$a_mat, Y = samp$Y, z_group = rl$z_group,
-                                     group_to_pheno = rl$group_to_pheno)
-  joint_diag <- if (!is.null(sw$joint)) diag(sw$joint$Sigma_joint) else rep(NA_real_, K0 - 1)
+  gs <- godambe_sandwich(samp$Y, samp$w, rl$z_point_estimate, samp$psu_id, samp$stratum, K0)
 
-  list(pi_hat = sw$pi_hat, adjusted_draws = sw$adjusted_draws,
+  list(pi_hat = colMeans(rl$prev_draws), se = gs$se, t_crit = gs$t_crit,
+       V_pi = gs$V_pi, c_corr = gs$c_corr, df_design = gs$df_design,
+       M_psu = gs$M_psu, H_strata = gs$H_strata,
        K_raw_active = rl$K_raw_active, K_hat_estimated = rl$K_hat_estimated,
        true_prevalence = TRUE_PREVALENCE,
-       M_psu = sw$M_psu, H_strata = sw$H_strata, df_design = sw$df_design,
-       c_corr = sw$c_corr, t_crit = sw$t_crit,
+       em_pi = gs$em_pi, em_converged = gs$em$converged,
        n_dens_fallback = fit$n_dens_fallback, n_sigma_fallback = fit$n_sigma_fallback,
-       # share of units whose largest a_ij is their own phenotype
-       a_mat_agreement = mean(max.col(rl$a_mat) == rl$z_point_estimate),
-       joint_used = !is.null(sw$joint),
-       joint_over_sandwich = joint_diag / diag(sw$Sigma_sandwich),
-       joint_over_additive = joint_diag / diag(sw$Sigma_sandwich + sw$Sigma_naive),
-       posterior = list(prev_draws_raw = rl$prev_draws, a_mat = rl$a_mat,
-                        z_point_estimate = rl$z_point_estimate,
+       posterior = list(prev_draws = rl$prev_draws, z_point_estimate = rl$z_point_estimate,
                         mu_k = fit$mu_k, Sigma_k = fit$Sigma_k,
-                        Sigma_sandwich = sw$Sigma_sandwich, Sigma_sandwich_raw = sw$Sigma_sandwich_raw,
-                        Sigma_naive = sw$Sigma_naive, Sigma_corrected = sw$Sigma_corrected,
-                        c_corr = sw$c_corr, t_crit = sw$t_crit, joint = sw$joint))
+                        em = gs$em, V_eta = gs$V_eta))
 }
 
 # results/: one small file per replicate and arm; posteriors_<tag>/: the
@@ -591,7 +494,7 @@ run_and_save_sample <- function(sample_id) {
   }
 
   settings <- list(result_tag = RESULT_TAG, scenario = SCENARIO, merge = MERGE,
-                   threshold = THRESHOLD, design_df = DESIGN_DF, joint = JOINT,
+                   threshold = THRESHOLD, design_df = DESIGN_DF,
                    seed = FIT_BASE_SEED + sample_id)
   t0 <- proc.time()
   result <- tryCatch(
