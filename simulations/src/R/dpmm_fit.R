@@ -10,6 +10,7 @@
 #   CLUSTER_C, N_PSU   scenario (0.3, 4)
 #   MERGE              datadriven (default) | truth
 #   THRESHOLD          1 (default) | 0   threshold consolidation
+#   N_ITER, N_BURNIN   MCMC iterations and burn-in (1500, 500)
 #   OUT_TAG            replaces RESULT_TAG (smoke tests)
 #
 # Summaries across replicates: summarize.R.
@@ -61,6 +62,8 @@ CLUSTER_C_STR <- Sys.getenv("CLUSTER_C", unset = "0.3")
 N_PSU_STR     <- Sys.getenv("N_PSU", unset = "4")
 MERGE         <- match.arg(Sys.getenv("MERGE", unset = "datadriven"), c("datadriven", "truth"))
 THRESHOLD     <- Sys.getenv("THRESHOLD", unset = "1") == "1" && MERGE == "datadriven"
+N_MCMC_ITER   <- as.integer(Sys.getenv("N_ITER", unset = "1500"))
+N_BURNIN      <- as.integer(Sys.getenv("N_BURNIN", unset = "500"))
 
 # Scenario tag c<C>[_npsu<N>]; the default 4 PSUs adds no suffix.
 SCENARIO <- sprintf("c%s", CLUSTER_C_STR)
@@ -68,7 +71,9 @@ if (N_PSU_STR != "4") SCENARIO <- paste0(SCENARIO, "_npsu", N_PSU_STR)
 
 # Production is the bare scenario tag; a suffix names each departure from it.
 RESULT_TAG <- paste0(SCENARIO,
-                     if (MERGE == "truth") "_truth" else if (!THRESHOLD) "_nothresh")
+                     if (MERGE == "truth") "_truth" else if (!THRESHOLD) "_nothresh",
+                     if (N_MCMC_ITER != 1500L || N_BURNIN != 500L)
+                       sprintf("_it%db%d", N_MCMC_ITER, N_BURNIN))
 OUT_TAG <- Sys.getenv("OUT_TAG", unset = "")
 if (nzchar(OUT_TAG)) RESULT_TAG <- OUT_TAG
 
@@ -81,8 +86,6 @@ SAMPLES_DIR <- file.path(PROJECT_ROOT, "data", sprintf("samples_%s", SCENARIO))
 L_TRUNC       <- 10
 ALPHA0_SPARSE <- 1
 SIGMA_FLOOR   <- 0.05
-N_MCMC_ITER   <- 1500
-N_BURNIN      <- 500
 FIT_BASE_SEED <- 20260930L   # replicate s uses FIT_BASE_SEED + s
 MERGE_MIN_WEIGHT <- 0.02     # threshold: minimum share of total weight
 MERGE_MIN_SEP    <- 1.5      # threshold: minimum centroid distance
@@ -485,7 +488,7 @@ run_and_save_sample <- function(sample_id) {
   }
 
   settings <- list(result_tag = RESULT_TAG, scenario = SCENARIO, merge = MERGE,
-                   threshold = THRESHOLD,
+                   threshold = THRESHOLD, n_iter = N_MCMC_ITER, n_burnin = N_BURNIN,
                    seed = FIT_BASE_SEED + sample_id)
   t0 <- proc.time()
   result <- tryCatch(
