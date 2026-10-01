@@ -10,6 +10,7 @@
 #   CLUSTER_C, N_PSU   scenario (0.3, 4)
 #   MERGE              datadriven (default) | truth
 #   THRESHOLD          1 (default) | 0   threshold consolidation
+#   WEIGHT_SUM         n (default) | neff   weights sum to n or to Kish's n_eff
 #   OUT_TAG            replaces RESULT_TAG (smoke tests)
 #
 # Summaries across replicates: summarize.R.
@@ -60,6 +61,7 @@ CLUSTER_C_STR <- Sys.getenv("CLUSTER_C", unset = "0.3")
 N_PSU_STR     <- Sys.getenv("N_PSU", unset = "4")
 MERGE         <- match.arg(Sys.getenv("MERGE", unset = "datadriven"), c("datadriven", "truth"))
 THRESHOLD     <- Sys.getenv("THRESHOLD", unset = "1") == "1" && MERGE == "datadriven"
+WEIGHT_SUM    <- match.arg(Sys.getenv("WEIGHT_SUM", unset = "n"), c("n", "neff"))
 
 # Scenario tag c<C>[_npsu<N>]; the default 4 PSUs adds no suffix.
 SCENARIO <- sprintf("c%s", CLUSTER_C_STR)
@@ -67,7 +69,8 @@ if (N_PSU_STR != "4") SCENARIO <- paste0(SCENARIO, "_npsu", N_PSU_STR)
 
 # Production is the bare scenario tag; a suffix names each departure from it.
 RESULT_TAG <- paste0(SCENARIO,
-                     if (MERGE == "truth") "_truth" else if (!THRESHOLD) "_nothresh")
+                     if (MERGE == "truth") "_truth" else if (!THRESHOLD) "_nothresh",
+                     if (WEIGHT_SUM == "neff") "_neff")
 OUT_TAG <- Sys.getenv("OUT_TAG", unset = "")
 if (nzchar(OUT_TAG)) RESULT_TAG <- OUT_TAG
 
@@ -404,16 +407,21 @@ godambe_sandwich <- function(Y, w, ph, psu_id, stratum, K) {
 run_one_sample <- function(sample_id) {
   samp <- readRDS(file.path(SAMPLES_DIR, sprintf("sample_%04d.rds", sample_id)))
 
-  # Same seed in every arm, so arms share the chain for each sample.
+  # Sample weights sum to n; optionally rescale them to sum to Kish's
+  # effective sample size n_eff = (sum w)^2 / sum w^2.
+  w <- samp$w
+  n_eff <- sum(w)^2 / sum(w^2)
+  if (WEIGHT_SUM == "neff") w <- w * n_eff / sum(w)
+
   set.seed(FIT_BASE_SEED + sample_id)
-  fit <- fit_wdpmm(samp$Y, samp$w)
-  ph <- summarize_phenotypes(fit, samp$w, samp$Y)
-  gs <- godambe_sandwich(samp$Y, samp$w, ph, samp$psu_id, samp$stratum, K0)
+  fit <- fit_wdpmm(samp$Y, w)
+  ph <- summarize_phenotypes(fit, w, samp$Y)
+  gs <- godambe_sandwich(samp$Y, w, ph, samp$psu_id, samp$stratum, K0)
 
   list(pi_hat = ph$pi, se = gs$se, t_crit = gs$t_crit,
        V_pi = gs$V_pi, df_design = gs$df_design,
        K_raw_active = ph$K_raw_active, K_hat_estimated = ph$K_hat_estimated,
-       true_prevalence = TRUE_PREVALENCE,
+       true_prevalence = TRUE_PREVALENCE, n = nrow(samp$Y), n_eff = n_eff,
        n_dens_fallback = fit$n_dens_fallback, n_sigma_fallback = fit$n_sigma_fallback,
        posterior = list(prev_draws = ph$prev_draws, z_point_estimate = ph$z_point_estimate,
                         mu = ph$mu, Sigma = ph$Sigma, V_eta = gs$V_eta))
@@ -438,7 +446,7 @@ run_and_save_sample <- function(sample_id) {
   }
 
   settings <- list(result_tag = RESULT_TAG, scenario = SCENARIO, merge = MERGE,
-                   threshold = THRESHOLD,
+                   threshold = THRESHOLD, weight_sum = WEIGHT_SUM,
                    seed = FIT_BASE_SEED + sample_id)
   t0 <- proc.time()
   result <- tryCatch(
