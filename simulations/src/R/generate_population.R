@@ -1,5 +1,5 @@
 # =============================================================================
-# Generate the finite population (one per CLUSTER_C).
+# Generate the finite population (one per CLUSTER_C and POP_SCENARIO).
 #
 #   z_hij | a, b, x2 ~ Categorical(softmax((x2 - 2) beta_k + c (a_hk + b_hik)))
 #   Y_hij | z = k   ~ N_P(mu_k, Sigma_k)
@@ -7,7 +7,11 @@
 # Clustering acts on phenotype membership (stratum effect a_hk, cluster
 # effect b_hik), not on Y, so phenotypes stay well separated while the design
 # still induces genuine cluster correlation. x2 later drives informative
-# stage-2 selection. Output: data/pop_c<C>/population.rds.
+# stage-2 selection. Output: data/pop_c<C>[_<scenario>]/population.rds.
+#
+# POP_SCENARIO: base (default) | overlap (centroids half as far apart) |
+#   rare (phenotype 4 at about 5%) | skew (skewed biomarkers, same means and
+#   covariances).
 # =============================================================================
 
 personal_lib <- "/nas/longleaf/home/aquijano/R/x86_64-pc-linux-gnu-library/4.5"
@@ -34,6 +38,9 @@ P_DIM        <- 3      # biomarkers
 # Clustering strength c on the phenotype logits.
 CLUSTER_C_STR <- Sys.getenv("CLUSTER_C", unset = "0.3")
 CLUSTER_C     <- as.numeric(CLUSTER_C_STR)
+POP_SCENARIO  <- match.arg(Sys.getenv("POP_SCENARIO", unset = "base"),
+                           c("base", "overlap", "rare", "skew"))
+POP_TAG <- paste0("c", CLUSTER_C_STR, if (POP_SCENARIO != "base") paste0("_", POP_SCENARIO))
 
 cat("========================================================================\n")
 cat(" GENERATING HIERARCHICAL POPULATION (CLUSTERING IN PHENOTYPE LOGITS)\n")
@@ -53,6 +60,7 @@ SIGMA0_LIST <- list(
   diag(c(0.6, 0.5, 0.6)),
   diag(c(0.5, 0.5, 0.7))
 )
+if (POP_SCENARIO == "overlap") MU0_LIST <- lapply(MU0_LIST, function(m) m / 2)
 
 # -----------------------------------------------------------------------------
 # 1. Strata and clusters
@@ -108,9 +116,10 @@ pop_dt[, x2 := rgamma(.N, shape = 2, rate = 1)]
 
 # eta_k = (x2 - 2) beta_k + c (a_hk + b_hik)
 beta_k <- c(-0.5, 0.5, -0.25, 0.25)
+eta0   <- if (POP_SCENARIO == "rare") c(0, 0, 0, -1.85) else rep(0, K0)
 eta_mat <- matrix(0, nrow = N_total, ncol = K0)
 for (k in seq_len(K0)) {
-  eta_mat[, k] <- (pop_dt$x2 - 2) * beta_k[k] +
+  eta_mat[, k] <- eta0[k] + (pop_dt$x2 - 2) * beta_k[k] +
                   CLUSTER_C * (pop_dt[[paste0("a_hk_", k)]] + pop_dt[[paste0("b_hik_", k)]])
 }
 
@@ -128,7 +137,11 @@ Y_mat <- matrix(NA_real_, nrow = N_total, ncol = P_DIM)
 for (k in seq_len(K0)) {
   idx_k <- which(pop_dt$z_true == k)
   n_k   <- length(idx_k)
-  if (n_k > 0) {
+  if (n_k > 0 && POP_SCENARIO == "skew") {
+    # Standardized Gamma(2) noise (skewness 1.41), scaled to the same SDs.
+    e <- (matrix(rgamma(n_k * P_DIM, shape = 2, rate = 1), n_k, P_DIM) - 2) / sqrt(2)
+    Y_mat[idx_k, ] <- sweep(sweep(e, 2, sqrt(diag(SIGMA0_LIST[[k]])), "*"), 2, MU0_LIST[[k]], "+")
+  } else if (n_k > 0) {
     Y_mat[idx_k, ] <- MASS::mvrnorm(n_k, mu = MU0_LIST[[k]], Sigma = SIGMA0_LIST[[k]])
   }
 }
@@ -156,6 +169,7 @@ cluster_info <- lapply(seq_len(nrow(cluster_dt)), function(i) {
 
 pop_obj <- list(
   cluster_c        = CLUSTER_C,
+  scenario         = POP_SCENARIO,
   H_STRATA         = H_STRATA,
   N_h              = N_h,
   total_clusters   = nrow(cluster_dt),
@@ -172,7 +186,7 @@ pop_obj <- list(
   true_prevalence  = as.numeric(true_prev),
   clustering_type  = "phenotype_probabilities"
 )
-out_dir <- sprintf("data/pop_c%s", CLUSTER_C_STR)
+out_dir <- file.path("data", paste0("pop_", POP_TAG))
 if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
 pop_file <- file.path(out_dir, "population.rds")
 saveRDS(pop_obj, pop_file)

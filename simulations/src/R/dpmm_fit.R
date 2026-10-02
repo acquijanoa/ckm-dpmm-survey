@@ -7,11 +7,13 @@
 #   3. godambe_sandwich       design-based SEs for the prevalences
 #
 # Options (environment variables; non-default values add a RESULT_TAG suffix):
-#   CLUSTER_C, N_PSU   scenario (0.3, 4)
+#   CLUSTER_C, N_PSU, POP_SCENARIO   scenario (0.3, 4, base)
 #   MERGE              datadriven (default) | nonempty | truth
 #   THRESHOLD          1 (default) | 0   threshold consolidation
 #   WEIGHT_SUM         n (default) | neff   weights sum to n or to Kish's n_eff
 #   ALPHA0             Dirichlet concentration, alpha0/L per component (1)
+#   L, KAPPA0          number of component slots (10); NIW prior strength (0.5)
+#   CHAIN              chain number, changes the seed (1)
 #   OUT_TAG            replaces RESULT_TAG (smoke tests)
 #
 # Summaries across replicates: summarize.R.
@@ -64,9 +66,14 @@ MERGE         <- match.arg(Sys.getenv("MERGE", unset = "datadriven"), c("datadri
 THRESHOLD     <- Sys.getenv("THRESHOLD", unset = "1") == "1" && MERGE == "datadriven"
 WEIGHT_SUM    <- match.arg(Sys.getenv("WEIGHT_SUM", unset = "n"), c("n", "neff"))
 ALPHA0_STR    <- Sys.getenv("ALPHA0", unset = "1")
+L_STR         <- Sys.getenv("L", unset = "10")
+KAPPA0_STR    <- Sys.getenv("KAPPA0", unset = "0.5")
+CHAIN         <- as.integer(Sys.getenv("CHAIN", unset = "1"))
+POP_SCENARIO  <- Sys.getenv("POP_SCENARIO", unset = "base")
 
-# Scenario tag c<C>[_npsu<N>]; the default 4 PSUs adds no suffix.
-SCENARIO <- sprintf("c%s", CLUSTER_C_STR)
+# Scenario tag c<C>[_<scenario>][_npsu<N>]; defaults add no suffix.
+POP_TAG  <- paste0("c", CLUSTER_C_STR, if (POP_SCENARIO != "base") paste0("_", POP_SCENARIO))
+SCENARIO <- POP_TAG
 if (N_PSU_STR != "4") SCENARIO <- paste0(SCENARIO, "_npsu", N_PSU_STR)
 
 # Production is the bare scenario tag; a suffix names each departure from it.
@@ -74,22 +81,26 @@ RESULT_TAG <- paste0(SCENARIO,
                      switch(MERGE, truth = "_truth", nonempty = "_nonempty",
                             datadriven = if (!THRESHOLD) "_nothresh"),
                      if (WEIGHT_SUM == "neff") "_neff",
-                     if (ALPHA0_STR != "1") paste0("_a", ALPHA0_STR))
+                     if (ALPHA0_STR != "1") paste0("_a", ALPHA0_STR),
+                     if (L_STR != "10") paste0("_L", L_STR),
+                     if (KAPPA0_STR != "0.5") paste0("_k", KAPPA0_STR),
+                     if (CHAIN != 1L) paste0("_ch", CHAIN))
 OUT_TAG <- Sys.getenv("OUT_TAG", unset = "")
 if (nzchar(OUT_TAG)) RESULT_TAG <- OUT_TAG
 
-POP_PATH    <- file.path(PROJECT_ROOT, "data", sprintf("pop_c%s", CLUSTER_C_STR), "population.rds")
+POP_PATH    <- file.path(PROJECT_ROOT, "data", paste0("pop_", POP_TAG), "population.rds")
 SAMPLES_DIR <- file.path(PROJECT_ROOT, "data", sprintf("samples_%s", SCENARIO))
 
 # -----------------------------------------------------------------------------
 # Fixed design constants
 # -----------------------------------------------------------------------------
-L_TRUNC       <- 10
+L_TRUNC       <- as.integer(L_STR)
+KAPPA0        <- as.numeric(KAPPA0_STR)
 ALPHA0_SPARSE <- as.numeric(ALPHA0_STR)
 SIGMA_FLOOR   <- 0.05
 N_MCMC_ITER   <- 1500
 N_BURNIN      <- 500
-FIT_BASE_SEED <- 20260930L   # replicate s uses FIT_BASE_SEED + s
+FIT_BASE_SEED <- 20260930L + 100000L * (CHAIN - 1L)   # replicate s uses FIT_BASE_SEED + s
 MERGE_MIN_WEIGHT <- 0.02     # threshold: minimum share of total weight
 MERGE_MIN_SEP    <- 1.5      # threshold: minimum centroid distance
 
@@ -112,7 +123,7 @@ floor_eigen <- function(Sigma, floor = SIGMA_FLOOR) {
 # Dirichlet counts and the NIW sufficient statistics. Returns the kept
 # allocations.
 fit_wdpmm <- function(Y, w, L = L_TRUNC, n_iter = N_MCMC_ITER, n_burnin = N_BURNIN,
-                       alpha0 = ALPHA0_SPARSE, kappa0 = 0.5, nu0 = P_DIM + 2) {
+                       alpha0 = ALPHA0_SPARSE, kappa0 = KAPPA0, nu0 = P_DIM + 2) {
   n <- nrow(Y); p <- ncol(Y)
   mu0 <- colSums(Y * w) / sum(w)
   Psi0 <- diag(colSums(w * sweep(Y, 2, mu0)^2) / sum(w)) * (nu0 - p - 1)
@@ -468,6 +479,7 @@ run_and_save_sample <- function(sample_id) {
 
   settings <- list(result_tag = RESULT_TAG, scenario = SCENARIO, merge = MERGE,
                    threshold = THRESHOLD, weight_sum = WEIGHT_SUM, alpha0 = ALPHA0_SPARSE,
+                   L = L_TRUNC, kappa0 = KAPPA0, chain = CHAIN,
                    seed = FIT_BASE_SEED + sample_id)
   t0 <- proc.time()
   result <- tryCatch(

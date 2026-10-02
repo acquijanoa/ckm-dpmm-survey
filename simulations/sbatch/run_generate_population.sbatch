@@ -10,6 +10,7 @@
 #SBATCH --error=logs/gen_pop_%j.err
 
 export CLUSTER_C="${CLUSTER_C:-0.3}"
+export POP_SCENARIO="${POP_SCENARIO:-base}"
 mkdir -p logs
 
 module load r/4.5.0

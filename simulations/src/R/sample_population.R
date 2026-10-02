@@ -21,11 +21,13 @@ CLUSTER_C_STR <- Sys.getenv("CLUSTER_C", unset = "0.3")
 
 N_PSU_STR <- Sys.getenv("N_PSU", unset = "4")
 
-# Scenario tag c<C>[_npsu<N>]; the default 4 PSUs adds no suffix.
-arm_tag <- sprintf("c%s", CLUSTER_C_STR)
+# Scenario tag c<C>[_<scenario>][_npsu<N>]; defaults add no suffix.
+POP_SCENARIO <- Sys.getenv("POP_SCENARIO", unset = "base")
+pop_tag <- paste0("c", CLUSTER_C_STR, if (POP_SCENARIO != "base") paste0("_", POP_SCENARIO))
+arm_tag <- pop_tag
 if (N_PSU_STR != "4") arm_tag <- paste0(arm_tag, "_npsu", N_PSU_STR)
 
-POP_FILE    <- sprintf("data/pop_c%s/population.rds", CLUSTER_C_STR)
+POP_FILE    <- sprintf("data/pop_%s/population.rds", pop_tag)
 SAMPLES_DIR <- sprintf("data/samples_%s", arm_tag)
 if (!dir.exists(SAMPLES_DIR)) dir.create(SAMPLES_DIR, recursive = TRUE)
 

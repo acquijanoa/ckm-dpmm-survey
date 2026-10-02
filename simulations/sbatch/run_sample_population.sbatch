@@ -10,6 +10,7 @@
 #SBATCH --error=logs/sample_pop_%j.err
 
 export CLUSTER_C="${CLUSTER_C:-0.3}"
+export POP_SCENARIO="${POP_SCENARIO:-base}"
 export N_PSU="${N_PSU:-4}"
 N_SAMPLES="${N_SAMPLES:-1000}"
 mkdir -p logs
