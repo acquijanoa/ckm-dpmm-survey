@@ -8,7 +8,8 @@
 #
 # Options (environment variables; non-default values add a RESULT_TAG suffix):
 #   CLUSTER_C, N_PSU, POP_SCENARIO   scenario (0.3, 4, base)
-#   MERGE              datadriven (default) | nonempty | truth
+#   MERGE              datadriven (default) | nonempty | modes | truth
+#   MODE_RATIO         modes: merge two groups if their ridgeline ratio >= this (1)
 #   THRESHOLD          1 (default) | 0   threshold consolidation
 #   WEIGHT_SUM         n (default) | neff   weights sum to n or to Kish's n_eff
 #   ALPHA0             Dirichlet concentration, alpha0/L per component (1)
@@ -62,7 +63,7 @@ if (!loaded) Rcpp::sourceCpp(cpp_file)
 # -----------------------------------------------------------------------------
 CLUSTER_C_STR <- Sys.getenv("CLUSTER_C", unset = "0.3")
 N_PSU_STR     <- Sys.getenv("N_PSU", unset = "4")
-MERGE         <- match.arg(Sys.getenv("MERGE", unset = "datadriven"), c("datadriven", "nonempty", "truth"))
+MERGE         <- match.arg(Sys.getenv("MERGE", unset = "datadriven"), c("datadriven", "nonempty", "modes", "truth"))
 THRESHOLD     <- Sys.getenv("THRESHOLD", unset = "1") == "1" && MERGE == "datadriven"
 WEIGHT_SUM    <- match.arg(Sys.getenv("WEIGHT_SUM", unset = "n"), c("n", "neff"))
 ALPHA0_STR    <- Sys.getenv("ALPHA0", unset = "1")
@@ -70,6 +71,7 @@ L_STR         <- Sys.getenv("L", unset = "10")
 KAPPA0_STR    <- Sys.getenv("KAPPA0", unset = "0.5")
 CHAIN         <- as.integer(Sys.getenv("CHAIN", unset = "1"))
 POP_SCENARIO  <- Sys.getenv("POP_SCENARIO", unset = "base")
+MODE_RATIO_STR <- Sys.getenv("MODE_RATIO", unset = "1")
 
 # Scenario tag c<C>[_<scenario>][_npsu<N>]; defaults add no suffix.
 POP_TAG  <- paste0("c", CLUSTER_C_STR, if (POP_SCENARIO != "base") paste0("_", POP_SCENARIO))
@@ -79,6 +81,7 @@ if (N_PSU_STR != "4") SCENARIO <- paste0(SCENARIO, "_npsu", N_PSU_STR)
 # Production is the bare scenario tag; a suffix names each departure from it.
 RESULT_TAG <- paste0(SCENARIO,
                      switch(MERGE, truth = "_truth", nonempty = "_nonempty",
+                            modes = paste0("_modes", if (MODE_RATIO_STR != "1") paste0("_r", MODE_RATIO_STR)),
                             datadriven = if (!THRESHOLD) "_nothresh"),
                      if (WEIGHT_SUM == "neff") "_neff",
                      if (ALPHA0_STR != "1") paste0("_a", ALPHA0_STR),
@@ -96,6 +99,7 @@ SAMPLES_DIR <- file.path(PROJECT_ROOT, "data", sprintf("samples_%s", SCENARIO))
 # -----------------------------------------------------------------------------
 L_TRUNC       <- as.integer(L_STR)
 KAPPA0        <- as.numeric(KAPPA0_STR)
+MODE_RATIO    <- as.numeric(MODE_RATIO_STR)
 ALPHA0_SPARSE <- as.numeric(ALPHA0_STR)
 SIGMA_FLOOR   <- 0.05
 N_MCMC_ITER   <- 1500
@@ -228,6 +232,51 @@ merge_small_close_groups <- function(z, Y, w, min_weight_frac, min_sep) {
   match(z, sort(unique(z)))
 }
 
+# Two-component Gaussian mixture along its ridgeline (Ray & Lindsay 2005),
+# where all of its modes lie. Returns a value above 1 if the mixture has a
+# single mode (larger for closer components); otherwise the ridgeline ratio,
+# the lowest density between the two highest peaks over the lower peak.
+ridgeline_ratio <- function(p1, mu1, S1, p2, mu2, S2, n_grid = 201) {
+  S1i <- solve(S1); S2i <- solve(S2)
+  b1 <- S1i %*% mu1; b2 <- S2i %*% mu2
+  a <- seq(0, 1, length.out = n_grid)
+  x <- t(vapply(a, function(al) solve((1 - al) * S1i + al * S2i, (1 - al) * b1 + al * b2)[, 1], mu1))
+  h <- (p1 * mvtnorm::dmvnorm(x, mu1, S1) + p2 * mvtnorm::dmvnorm(x, mu2, S2)) / (p1 + p2)
+  up <- diff(h) > 0
+  peaks <- which(c(TRUE, up) & c(!up, TRUE))
+  if (length(peaks) == 1) {
+    d2 <- as.numeric(t(mu1 - mu2) %*% solve((S1 + S2) / 2, mu1 - mu2))
+    return(1 + 1 / (1 + d2))
+  }
+  top <- sort(peaks[order(h[peaks], decreasing = TRUE)[1:2]])
+  min(h[top[1]:top[2]]) / min(h[top])
+}
+
+# Merge groups into modes of the density (Hennig 2010): repeatedly merge the
+# pair with the highest ridgeline ratio, each group taken as a Gaussian with
+# its weighted moments, until no pair reaches min_ratio (1 = single mode).
+merge_by_modes <- function(z, Y, w, min_ratio) {
+  repeat {
+    groups <- sort(unique(z))
+    G <- length(groups)
+    if (G <= 1) break
+    mom <- lapply(groups, function(g) {
+      idx <- which(z == g); wg <- w[idx]
+      mu <- colSums(Y[idx, , drop = FALSE] * wg) / sum(wg)
+      d <- sweep(Y[idx, , drop = FALSE], 2, mu)
+      list(p = sum(wg), mu = mu, S = floor_eigen(crossprod(d * sqrt(wg)) / sum(wg)))
+    })
+    best <- c(1L, 2L); best_r <- -Inf
+    for (i in seq_len(G - 1)) for (j in (i + 1):G) {
+      r <- ridgeline_ratio(mom[[i]]$p, mom[[i]]$mu, mom[[i]]$S, mom[[j]]$p, mom[[j]]$mu, mom[[j]]$S)
+      if (r > best_r) { best_r <- r; best <- c(i, j) }
+    }
+    if (best_r < min_ratio) break
+    z[z == groups[best[2]]] <- groups[best[1]]
+  }
+  match(z, sort(unique(z)))
+}
+
 # Label G estimated groups by true phenotype, for scoring: each phenotype
 # takes its nearest unassigned group; leftover groups join their nearest
 # phenotype.
@@ -258,6 +307,8 @@ align_groups_to_truth <- function(centroids) {
 #   nonempty:   K is the most frequent number of non-empty components per
 #               draw (van Havre et al. 2015); the partition is the draw with
 #               that many components that best matches the similarity matrix.
+#   modes:      the nonempty partition, with groups merged into modes of the
+#               density (merge_by_modes).
 #   Either way, in every draw each component joins the group holding most of
 #   its weight.
 #   truth:      in every draw each component joins the nearest true centroid.
@@ -284,6 +335,7 @@ summarize_phenotypes <- function(fit, w, Y) {
       if (length(cand) > 50) cand <- cand[round(seq(1, length(cand), length.out = 50))]
       z_hat <- as.integer(mcclust::maxpear(psm, cls.draw = z_draws[cand, , drop = FALSE],
                                            method = "draws")$cl)
+      if (MERGE == "modes") z_hat <- merge_by_modes(z_hat, Y, w, MODE_RATIO)
     }
     z_hat <- match(z_hat, sort(unique(z_hat)))
     K_hat <- max(z_hat)
@@ -479,7 +531,7 @@ run_and_save_sample <- function(sample_id) {
 
   settings <- list(result_tag = RESULT_TAG, scenario = SCENARIO, merge = MERGE,
                    threshold = THRESHOLD, weight_sum = WEIGHT_SUM, alpha0 = ALPHA0_SPARSE,
-                   L = L_TRUNC, kappa0 = KAPPA0, chain = CHAIN,
+                   L = L_TRUNC, kappa0 = KAPPA0, chain = CHAIN, mode_ratio = MODE_RATIO,
                    seed = FIT_BASE_SEED + sample_id)
   t0 <- proc.time()
   result <- tryCatch(

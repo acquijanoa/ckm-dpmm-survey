@@ -28,6 +28,7 @@ export POP_SCENARIO="${POP_SCENARIO:-base}"
 export L="${L:-10}"
 export KAPPA0="${KAPPA0:-0.5}"
 export CHAIN="${CHAIN:-1}"
+export MODE_RATIO="${MODE_RATIO:-1}"
 # Same BLAS kernels on every node type, so fits are reproducible across nodes.
 export OPENBLAS_CORETYPE=Haswell
 mkdir -p logs results .rcpp_cache
