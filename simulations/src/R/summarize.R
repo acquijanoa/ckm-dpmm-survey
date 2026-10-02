@@ -6,7 +6,8 @@
 #
 # Per phenotype: bias, empirical vs. estimated SE, coverage of the truth and
 # of the across-replicate mean (centered coverage). Intervals are
-# pi_hat +/- t_crit * se.
+# pi_hat +/- t_crit * se. Replicates whose SE was flagged as unusable
+# (se_flag) are counted and left out of the SE and coverage columns.
 # =============================================================================
 
 get_project_root <- function() {
@@ -43,10 +44,10 @@ summarize_arm <- function(tag) {
   pi_bar <- colMeans(pi_mat)
 
   covers <- function(target) {
-    colMeans(sweep(lo, 2, target, "<=") & sweep(hi, 2, target, ">="))
+    colMeans(sweep(lo, 2, target, "<=") & sweep(hi, 2, target, ">="), na.rm = TRUE)
   }
   emp_se <- apply(pi_mat, 2, sd)
-  est_se <- colMeans(se_mat)
+  est_se <- colMeans(se_mat, na.rm = TRUE)
 
   tbl <- data.frame(
     phenotype           = seq_len(K),
@@ -73,6 +74,7 @@ summarize_arm <- function(tag) {
     mean_df_design       = mean(get_num("df_design")),
     n_fallback_reps      = sum(get_num("n_dens_fallback") + get_num("n_sigma_fallback") > 0, na.rm = TRUE),
     n_outliers_0.10      = sum(worst_dev > 0.10),
+    n_se_flagged         = sum(!is.finite(rowSums(se_mat))),
     mean_coverage_pct    = mean(tbl$coverage_pct)
   )
 
@@ -87,8 +89,8 @@ print_summary <- function(s) {
               s$arm_tag, s$n_completed, s$n_errors,
               if (is.na(s$k0_recovery_pct)) "n/a" else sprintf("%.1f%%", s$k0_recovery_pct),
               s$mean_coverage_pct))
-  cat(sprintf("   outliers(>0.10)=%d, reps with fallbacks=%d\n",
-              s$n_outliers_0.10, s$n_fallback_reps))
+  cat(sprintf("   outliers(>0.10)=%d, SE flagged=%d, reps with fallbacks=%d\n",
+              s$n_outliers_0.10, s$n_se_flagged, s$n_fallback_reps))
   print(format(s$table, digits = 3), row.names = FALSE)
 }
 

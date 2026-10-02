@@ -3,11 +3,9 @@
 # method and options). Production defaults need no --export; arms differ by
 # the options listed in dpmm_fit.R's header, and each lands under its own RESULT_TAG.
 #
-#   sbatch --array=1-1000 run_fit.sbatch                            # c0.3 (production)
-#   sbatch --array=1-1000 --export=ALL,MERGE=truth run_fit.sbatch   # c0.3_truth
-#   sbatch --array=1-1000 --export=ALL,THRESHOLD=0 run_fit.sbatch   # c0.3_nothresh
-#   sbatch --array=1-1000 --export=ALL,WEIGHT_SUM=neff run_fit.sbatch   # c0.3_neff
-#   sbatch --array=1-200 --export=ALL,MERGE=nonempty,ALPHA0=0.01 run_fit.sbatch   # c0.3_nonempty_a0.01
+#   sbatch --array=1-1000 run_fit.sbatch                                  # c0.3 (production)
+#   sbatch --array=1-1000 --export=ALL,MERGE=truth run_fit.sbatch         # c0.3_truth
+#   sbatch --array=1-1000 --export=ALL,POP_SCENARIO=rare run_fit.sbatch   # c0.3_rare
 #
 # Measured per task: ~2 min, <1 GB.
 
@@ -20,10 +18,10 @@
 
 export CLUSTER_C="${CLUSTER_C:-0.3}"
 export N_PSU="${N_PSU:-4}"
-export MERGE="${MERGE:-datadriven}"
+export MERGE="${MERGE:-modes}"
 export THRESHOLD="${THRESHOLD:-1}"
-export WEIGHT_SUM="${WEIGHT_SUM:-n}"
-export ALPHA0="${ALPHA0:-1}"
+export WEIGHT_SUM="${WEIGHT_SUM:-neff}"
+export ALPHA0="${ALPHA0:-0.001}"
 export POP_SCENARIO="${POP_SCENARIO:-base}"
 export L="${L:-10}"
 export KAPPA0="${KAPPA0:-0.5}"

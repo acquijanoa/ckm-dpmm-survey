@@ -8,11 +8,11 @@
 #
 # Options (environment variables; non-default values add a RESULT_TAG suffix):
 #   CLUSTER_C, N_PSU, POP_SCENARIO   scenario (0.3, 4, base)
-#   MERGE              datadriven (default) | nonempty | modes | truth
+#   MERGE              modes (default) | nonempty | datadriven | truth
 #   MODE_RATIO         modes: merge two groups if their ridgeline ratio >= this (1)
-#   THRESHOLD          1 (default) | 0   threshold consolidation
-#   WEIGHT_SUM         n (default) | neff   weights sum to n or to Kish's n_eff
-#   ALPHA0             Dirichlet concentration, alpha0/L per component (1)
+#   THRESHOLD          datadriven only: 1 (default) | 0   threshold consolidation
+#   WEIGHT_SUM         neff (default) | n   weights sum to Kish's n_eff or to n
+#   ALPHA0             Dirichlet concentration, alpha0/L per component (0.001)
 #   L, KAPPA0          number of component slots (10); NIW prior strength (0.5)
 #   CHAIN              chain number, changes the seed (1)
 #   OUT_TAG            replaces RESULT_TAG (smoke tests)
@@ -63,10 +63,10 @@ if (!loaded) Rcpp::sourceCpp(cpp_file)
 # -----------------------------------------------------------------------------
 CLUSTER_C_STR <- Sys.getenv("CLUSTER_C", unset = "0.3")
 N_PSU_STR     <- Sys.getenv("N_PSU", unset = "4")
-MERGE         <- match.arg(Sys.getenv("MERGE", unset = "datadriven"), c("datadriven", "nonempty", "modes", "truth"))
+MERGE         <- match.arg(Sys.getenv("MERGE", unset = "modes"), c("modes", "nonempty", "datadriven", "truth"))
 THRESHOLD     <- Sys.getenv("THRESHOLD", unset = "1") == "1" && MERGE == "datadriven"
-WEIGHT_SUM    <- match.arg(Sys.getenv("WEIGHT_SUM", unset = "n"), c("n", "neff"))
-ALPHA0_STR    <- Sys.getenv("ALPHA0", unset = "1")
+WEIGHT_SUM    <- match.arg(Sys.getenv("WEIGHT_SUM", unset = "neff"), c("neff", "n"))
+ALPHA0_STR    <- Sys.getenv("ALPHA0", unset = "0.001")
 L_STR         <- Sys.getenv("L", unset = "10")
 KAPPA0_STR    <- Sys.getenv("KAPPA0", unset = "0.5")
 CHAIN         <- as.integer(Sys.getenv("CHAIN", unset = "1"))
@@ -81,10 +81,10 @@ if (N_PSU_STR != "4") SCENARIO <- paste0(SCENARIO, "_npsu", N_PSU_STR)
 # Production is the bare scenario tag; a suffix names each departure from it.
 RESULT_TAG <- paste0(SCENARIO,
                      switch(MERGE, truth = "_truth", nonempty = "_nonempty",
-                            modes = paste0("_modes", if (MODE_RATIO_STR != "1") paste0("_r", MODE_RATIO_STR)),
-                            datadriven = if (!THRESHOLD) "_nothresh"),
-                     if (WEIGHT_SUM == "neff") "_neff",
-                     if (ALPHA0_STR != "1") paste0("_a", ALPHA0_STR),
+                            modes = if (MODE_RATIO_STR != "1") paste0("_r", MODE_RATIO_STR),
+                            datadriven = paste0("_datadriven", if (!THRESHOLD) "_nothresh")),
+                     if (WEIGHT_SUM == "n") "_wn",
+                     if (ALPHA0_STR != "0.001") paste0("_a", ALPHA0_STR),
                      if (L_STR != "10") paste0("_L", L_STR),
                      if (KAPPA0_STR != "0.5") paste0("_k", KAPPA0_STR),
                      if (CHAIN != 1L) paste0("_ch", CHAIN))
@@ -443,10 +443,30 @@ unit_scores <- function(eta, Y, w, G) {
 # Jacobian of the score, J the delete-one-PSU jackknife of the PSU score
 # totals. Returns the K x K prevalence covariance and SEs, and the t critical
 # value on M - H degrees of freedom (sampled PSUs minus strata).
+# When the sandwich cannot be trusted the SEs are NA and se_flag says why:
+# one phenotype only, a singular system, H with reciprocal condition number
+# below 1e-10, or an SE that is not finite or exceeds 0.5 (the largest
+# possible SD of a proportion).
 godambe_sandwich <- function(Y, w, ph, psu_id, stratum, K) {
+  df_design <- max(length(unique(psu_id)) - length(unique(stratum)), 1)
+  out <- list(V_pi = matrix(NA_real_, K, K), se = rep(NA_real_, K), V_eta = NULL,
+              df_design = df_design, t_crit = qt(0.975, df_design),
+              H_rcond = NA_real_, se_flag = NA_character_)
+  if (length(ph$present) < 2) { out$se_flag <- "one phenotype"; return(out) }
+
+  fit <- tryCatch(sandwich_core(Y, w, ph, psu_id, stratum, K),
+                  error = function(e) conditionMessage(e))
+  if (is.character(fit)) { out$se_flag <- paste("singular:", fit); return(out) }
+  out$H_rcond <- fit$H_rcond
+  if (!is.finite(fit$H_rcond) || fit$H_rcond < 1e-10) { out$se_flag <- "ill-conditioned H"; return(out) }
+  if (any(!is.finite(fit$se)) || any(fit$se > 0.5)) { out$se_flag <- "unstable SE"; return(out) }
+  out[c("V_pi", "se", "V_eta")] <- fit[c("V_pi", "se", "V_eta")]
+  out
+}
+
+sandwich_core <- function(Y, w, ph, psu_id, stratum, K) {
   keep <- ph$present
   G <- length(keep)
-  if (G < 2) stop("fewer than two phenotypes in the partition")
 
   eta <- pack_eta(ph$pi[keep], ph$mu, ph$Sigma)
   d <- length(eta)
@@ -471,7 +491,6 @@ godambe_sandwich <- function(Y, w, ph, psu_id, stratum, K) {
 
   H_inv <- solve(H_hat)
   V_eta <- H_inv %*% J_hat %*% H_inv
-  df_design <- max(length(unique_psus) - length(unique(stratum)), 1)
 
   # Prevalence block -> all G components (pi_G = 1 - sum) -> K phenotypes.
   B <- rbind(diag(G - 1), -1)
@@ -480,8 +499,8 @@ godambe_sandwich <- function(Y, w, ph, psu_id, stratum, K) {
   A_map[cbind(keep, seq_len(G))] <- 1
   V_pi <- A_map %*% V_group %*% t(A_map)
 
-  list(V_pi = V_pi, se = sqrt(diag(V_pi)), V_eta = V_eta,
-       df_design = df_design, t_crit = qt(0.975, df_design))
+  list(V_pi = V_pi, se = suppressWarnings(sqrt(diag(V_pi))), V_eta = V_eta,
+       H_rcond = rcond(H_hat))
 }
 
 # -----------------------------------------------------------------------------
@@ -503,6 +522,7 @@ run_one_sample <- function(sample_id) {
 
   list(pi_hat = ph$pi, se = gs$se, t_crit = gs$t_crit,
        V_pi = gs$V_pi, df_design = gs$df_design,
+       se_flag = gs$se_flag, H_rcond = gs$H_rcond,
        K_raw_active = ph$K_raw_active, K_hat_estimated = ph$K_hat_estimated,
        k_nonempty = ph$k_nonempty,
        true_prevalence = TRUE_PREVALENCE, n = nrow(samp$Y), n_eff = n_eff,
