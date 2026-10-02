@@ -8,9 +8,10 @@
 #
 # Options (environment variables; non-default values add a RESULT_TAG suffix):
 #   CLUSTER_C, N_PSU   scenario (0.3, 4)
-#   MERGE              datadriven (default) | truth
+#   MERGE              datadriven (default) | nonempty | truth
 #   THRESHOLD          1 (default) | 0   threshold consolidation
 #   WEIGHT_SUM         n (default) | neff   weights sum to n or to Kish's n_eff
+#   ALPHA0             Dirichlet concentration, alpha0/L per component (1)
 #   OUT_TAG            replaces RESULT_TAG (smoke tests)
 #
 # Summaries across replicates: summarize.R.
@@ -59,9 +60,10 @@ if (!loaded) Rcpp::sourceCpp(cpp_file)
 # -----------------------------------------------------------------------------
 CLUSTER_C_STR <- Sys.getenv("CLUSTER_C", unset = "0.3")
 N_PSU_STR     <- Sys.getenv("N_PSU", unset = "4")
-MERGE         <- match.arg(Sys.getenv("MERGE", unset = "datadriven"), c("datadriven", "truth"))
+MERGE         <- match.arg(Sys.getenv("MERGE", unset = "datadriven"), c("datadriven", "nonempty", "truth"))
 THRESHOLD     <- Sys.getenv("THRESHOLD", unset = "1") == "1" && MERGE == "datadriven"
 WEIGHT_SUM    <- match.arg(Sys.getenv("WEIGHT_SUM", unset = "n"), c("n", "neff"))
+ALPHA0_STR    <- Sys.getenv("ALPHA0", unset = "1")
 
 # Scenario tag c<C>[_npsu<N>]; the default 4 PSUs adds no suffix.
 SCENARIO <- sprintf("c%s", CLUSTER_C_STR)
@@ -69,8 +71,10 @@ if (N_PSU_STR != "4") SCENARIO <- paste0(SCENARIO, "_npsu", N_PSU_STR)
 
 # Production is the bare scenario tag; a suffix names each departure from it.
 RESULT_TAG <- paste0(SCENARIO,
-                     if (MERGE == "truth") "_truth" else if (!THRESHOLD) "_nothresh",
-                     if (WEIGHT_SUM == "neff") "_neff")
+                     switch(MERGE, truth = "_truth", nonempty = "_nonempty",
+                            datadriven = if (!THRESHOLD) "_nothresh"),
+                     if (WEIGHT_SUM == "neff") "_neff",
+                     if (ALPHA0_STR != "1") paste0("_a", ALPHA0_STR))
 OUT_TAG <- Sys.getenv("OUT_TAG", unset = "")
 if (nzchar(OUT_TAG)) RESULT_TAG <- OUT_TAG
 
@@ -81,7 +85,7 @@ SAMPLES_DIR <- file.path(PROJECT_ROOT, "data", sprintf("samples_%s", SCENARIO))
 # Fixed design constants
 # -----------------------------------------------------------------------------
 L_TRUNC       <- 10
-ALPHA0_SPARSE <- 1
+ALPHA0_SPARSE <- as.numeric(ALPHA0_STR)
 SIGMA_FLOOR   <- 0.05
 N_MCMC_ITER   <- 1500
 N_BURNIN      <- 500
@@ -239,8 +243,12 @@ align_groups_to_truth <- function(centroids) {
 
 # Merge the raw components into phenotypes and summarize the draws.
 #   datadriven: the units are partitioned into groups from the posterior
-#               similarity matrix (plus threshold consolidation); in every
-#               draw each component joins the group holding most of its weight.
+#               similarity matrix (plus threshold consolidation).
+#   nonempty:   K is the most frequent number of non-empty components per
+#               draw (van Havre et al. 2015); the partition is the draw with
+#               that many components that best matches the similarity matrix.
+#   Either way, in every draw each component joins the group holding most of
+#   its weight.
 #   truth:      in every draw each component joins the nearest true centroid.
 # Each draw then gives every unit a phenotype, from which come the draw's
 # prevalences and each phenotype's weighted mean and covariance. Returns the
@@ -249,12 +257,24 @@ summarize_phenotypes <- function(fit, w, Y) {
   z_draws <- fit$z_draws
   m <- nrow(z_draws); n <- ncol(z_draws); p <- ncol(Y)
 
-  if (MERGE == "datadriven") {
-    z_hat <- as.integer(mcclust::maxpear(mcclust::comp.psm(z_draws))$cl)
-    z_hat <- match(z_hat, sort(unique(z_hat)))
-    if (THRESHOLD) {
-      z_hat <- merge_small_close_groups(z_hat, Y, w, MERGE_MIN_WEIGHT, MERGE_MIN_SEP)
+  # Number of non-empty components in each draw.
+  k_draw <- apply(z_draws, 1, function(z) length(unique(z)))
+  k_table <- tabulate(k_draw, L_TRUNC)
+
+  if (MERGE != "truth") {
+    psm <- mcclust::comp.psm(z_draws)
+    if (MERGE == "datadriven") {
+      z_hat <- as.integer(mcclust::maxpear(psm)$cl)
+      if (THRESHOLD) {
+        z_hat <- merge_small_close_groups(z_hat, Y, w, MERGE_MIN_WEIGHT, MERGE_MIN_SEP)
+      }
+    } else {
+      cand <- which(k_draw == which.max(k_table))
+      if (length(cand) > 50) cand <- cand[round(seq(1, length(cand), length.out = 50))]
+      z_hat <- as.integer(mcclust::maxpear(psm, cls.draw = z_draws[cand, , drop = FALSE],
+                                           method = "draws")$cl)
     }
+    z_hat <- match(z_hat, sort(unique(z_hat)))
     K_hat <- max(z_hat)
     group_centroids <- t(sapply(seq_len(K_hat), function(g) weighted_centroid(Y, w, which(z_hat == g))))
     group_to_pheno <- align_groups_to_truth(matrix(group_centroids, K_hat))
@@ -274,7 +294,7 @@ summarize_phenotypes <- function(fit, w, Y) {
   for (i in seq_len(m)) {
     z <- z_draws[i, ]
     # Phenotype of each component present in this draw (rows in label order).
-    if (MERGE == "datadriven") {
+    if (MERGE != "truth") {
       comp_pheno <- group_to_pheno[max.col(rowsum(group_w, z), ties.method = "first")]
     } else {
       cen <- rowsum(wY, z) / as.numeric(rowsum(w, z))
@@ -300,7 +320,7 @@ summarize_phenotypes <- function(fit, w, Y) {
        mu = lapply(present, function(j) mu_sum[j, ] / n_present[j]),
        Sigma = lapply(present, function(j) matrix(S_sum[j, ] / n_present[j], p, p)),
        z_point_estimate = apply(pheno_draws, 2, function(x) which.max(tabulate(x, K0))),
-       K_hat_estimated = K_hat,
+       K_hat_estimated = K_hat, k_nonempty = k_table,
        K_raw_active = min(which(cumsum(occ) / sum(occ) >= 0.99)))
 }
 
@@ -421,6 +441,7 @@ run_one_sample <- function(sample_id) {
   list(pi_hat = ph$pi, se = gs$se, t_crit = gs$t_crit,
        V_pi = gs$V_pi, df_design = gs$df_design,
        K_raw_active = ph$K_raw_active, K_hat_estimated = ph$K_hat_estimated,
+       k_nonempty = ph$k_nonempty,
        true_prevalence = TRUE_PREVALENCE, n = nrow(samp$Y), n_eff = n_eff,
        n_dens_fallback = fit$n_dens_fallback, n_sigma_fallback = fit$n_sigma_fallback,
        posterior = list(prev_draws = ph$prev_draws, z_point_estimate = ph$z_point_estimate,
@@ -446,7 +467,7 @@ run_and_save_sample <- function(sample_id) {
   }
 
   settings <- list(result_tag = RESULT_TAG, scenario = SCENARIO, merge = MERGE,
-                   threshold = THRESHOLD, weight_sum = WEIGHT_SUM,
+                   threshold = THRESHOLD, weight_sum = WEIGHT_SUM, alpha0 = ALPHA0_SPARSE,
                    seed = FIT_BASE_SEED + sample_id)
   t0 <- proc.time()
   result <- tryCatch(
