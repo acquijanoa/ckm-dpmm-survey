@@ -1,53 +1,38 @@
-# Model, Prior and Survey Weights {#sec-formulation}
+# Model, Likelihood and Prior {#sec-formulation}
 
-This chapter states the model the sampler fits and how the survey weights are defined. The sampler itself is in @sec-gibbs.
+This chapter writes down the model: the parameter vector, the likelihood, its survey-weighted versions, and the prior with the value of every hyperparameter. @sec-gibbs derives the sampler from these pieces.
 
-## The mixture model
+## The parameter vector and the likelihood
 
-Each person's biomarkers are modelled as coming from one of $L$ Gaussian components:
-
-$$
-y_i \mid z_i = k \sim \mathcal{N}_P(\mu_k, \Sigma_k), \qquad \Pr(z_i = k) = p_k .
-$$
-
-Summing over the unknown allocation gives the mixture density of person $i$:
+The model has $L$ Gaussian components. Component $k$ has a weight $p_k$, a mean $\mu_k \in \mathbb{R}^P$ and a covariance matrix $\Sigma_k$. All parameters together form
 
 $$
-f_i(\eta) = \sum_{k=1}^{L} p_k\, \phi(y_i \mid \mu_k, \Sigma_k), \qquad \eta = (p, \mu_1, \Sigma_1, \dots, \mu_L, \Sigma_L).
+\Theta = \big(p, \theta_1, \dots, \theta_L\big), \qquad p = (p_1, \dots, p_L), \quad \sum_{k=1}^{L} p_k = 1, \qquad \theta_k = (\mu_k, \Sigma_k).
+$$
+
+Each person's biomarkers come from one component. With $\phi(y \mid \theta_k)$ the density of $\mathcal{N}_P(\mu_k, \Sigma_k)$, the density of person $i$ is the mixture
+
+$$
+f(y_i \mid \Theta) = \sum_{k=1}^{L} p_k\, \phi(y_i \mid \theta_k),
+$$
+
+and for $n$ independent people the likelihood is
+
+$$
+L(\Theta; y) = \prod_{i=1}^{n} \sum_{k=1}^{L} p_k\, \phi(y_i \mid \theta_k).
 $$
 
 $L$ is deliberately larger than the number of phenotypes expected: $L = 10$ in the simulations (four true phenotypes) and $L = 20$ for NHANES. This is an *overfitted* mixture. It avoids choosing the number of components before seeing the data.
 
-## The sparse prior that empties extra components
+### The complete-data likelihood
 
-The component weights have a symmetric Dirichlet prior with a very small parameter:
-
-$$
-p \sim \text{Dirichlet}(a, \dots, a), \qquad a = \frac{\alpha_0}{L} = \frac{0.001}{10} = 10^{-4}.
-$$
-
-A Dirichlet with $a$ this small puts almost all of its mass on weight vectors where a few components carry everything and the rest are near zero. @rousseau2011asymptotic showed that when the mixture has more components than the truth and $a < d/2$, with $d$ the number of parameters per component, the posterior weight of the extra components goes to zero as $n$ grows. Here $d = P + P(P+1)/2 = 9$ for $P = 3$, so the condition holds by a wide margin.
-
-In practice the extra components end up with no people assigned to them. The number of non-empty components in a draw is then a count of the Gaussians the data need, which is not the same as the number of phenotypes (see @sec-phenotypes).
-
-## The prior on means and covariances
-
-Each component has a normal-inverse-Wishart prior:
+The sum inside the product makes this likelihood awkward to work with. The standard device is to introduce each person's allocation $z_i \in \{1, \dots, L\}$, the component they come from, with $\Pr(z_i = k \mid \Theta) = p_k$ and $y_i \mid z_i = k \sim \mathcal{N}_P(\mu_k, \Sigma_k)$. Summing over $z_i$ gives back $f(y_i \mid \Theta)$. If the allocations were known, the likelihood would be a product with no sums:
 
 $$
-\Sigma_k \sim \mathcal{W}^{-1}(\nu_0, \Psi_0), \qquad \mu_k \mid \Sigma_k \sim \mathcal{N}_P\!\left(m_0, \tfrac{1}{\kappa_0}\Sigma_k\right).
+L(\Theta; y, z) = \prod_{i=1}^{n} p_{z_i}\, \phi(y_i \mid \theta_{z_i}) = \prod_{k=1}^{L} \Big[\, p_k^{\,n_k} \prod_{i:\, z_i = k} \phi(y_i \mid \theta_k) \Big],
 $$
 
-The settings are tied to the data so that they do not depend on the units of the biomarkers:
-
-| Setting | Value | Meaning |
-| :--- | :--- | :--- |
-| $m_0$ | Weighted mean of $y$ | Prior centre of every component mean. |
-| $\kappa_0$ | 0.5 | The prior on a mean counts as half an observation. |
-| $\nu_0$ | $P + 2$ | The smallest value for which the prior mean of $\Sigma_k$ exists. |
-| $\Psi_0$ | Diagonal of the weighted variances of $y$, times $(\nu_0 - P - 1) = 1$ | The prior mean of $\Sigma_k$ is the diagonal of the overall weighted variances. |
-
-A component with no people assigned is drawn from this prior, so empty components wander over the whole range of the data.
+where $n_k$ is the number of people in component $k$. The second form shows why this helps: the likelihood splits into one factor for $p$ and one factor per component. The Gibbs sampler exploits exactly this split.
 
 ## Survey weights {#sec-weights}
 
@@ -56,46 +41,113 @@ The weight $w_i$ is the inverse of person $i$'s probability of being sampled. A 
 The samples come with weights that sum to $n$. Before fitting, the code rescales them to sum to **Kish's effective sample size** [@kish1965survey]:
 
 $$
-n_{\text{eff}} = \frac{\left(\sum_i w_i\right)^2}{\sum_i w_i^2}, \qquad w_i \leftarrow w_i \, \frac{n_{\text{eff}}}{\sum_j w_j}.
+n_{\text{eff}} = \frac{\left(\sum_i w_i\right)^2}{\sum_i w_i^2}, \qquad w_i \leftarrow w_i \, \frac{n_{\text{eff}}}{\sum_j w_j}, \qquad \text{so that } \sum_{i=1}^n w_i = n_{\text{eff}} .
 $$
 
-$n_{\text{eff}}$ is the size of an equally weighted sample that would give the same precision for a weighted mean. With unequal weights it is smaller than $n$; in the second simulation design $n / n_{\text{eff}}$ is about 1.9.
+$n_{\text{eff}}$ is the size of an equally weighted sample that would give the same precision for a weighted mean. With unequal weights it is smaller than $n$; in the second simulation design $n / n_{\text{eff}}$ is about 1.9. @sec-p-neff shows what this rescaling does to the posterior of $p$.
 
-The total of the weights acts as the sample size the sampler believes it has. It therefore controls how concentrated the draws are and how readily extra components empty. It does not affect the standard errors of @sec-jackknife, which are unchanged when all weights are multiplied by a constant.
+## Survey-weighted likelihoods {#sec-two-pl}
 
-## Two pseudo-likelihoods {#sec-two-pl}
+With survey data the likelihood is replaced by a *pseudo-likelihood*, in which each person's contribution is raised to the power of their weight [@pfeffermann1993role; @savitskytoth2015bayesian]. The idea: a person with weight 5 stands for 5 population members, so their log-likelihood term is counted 5 times. For a mixture there are two versions, one for each likelihood above.
 
-With survey data the usual likelihood is replaced by a weighted version, a *pseudo-likelihood* [@pfeffermann1993role; @savitskytoth2015bayesian]. For a mixture there are two, and the difference between them matters for understanding the sampler.
-
-**Complete-data pseudo-likelihood.** It treats the allocations as known:
+**Complete-data pseudo-likelihood**, allocations known:
 
 $$
-L_w^{c}(\eta, z) = \prod_i \left[\, p_{z_i}\, \phi(y_i \mid \theta_{z_i}) \right]^{w_i}.
+L_w(\Theta; y, z) = \prod_{i=1}^{n} \big[\, p_{z_i}\, \phi(y_i \mid \theta_{z_i}) \big]^{w_i}
+= \prod_{k=1}^{L} \Big[\, p_k^{\,n_k^{(w)}} \prod_{i:\, z_i = k} \phi(y_i \mid \theta_k)^{w_i} \Big],
+\qquad n_k^{(w)} = \sum_{i:\, z_i = k} w_i .
 $$
 
-**Marginal pseudo-likelihood.** It sums the allocations out:
+The weighted count $n_k^{(w)}$ replaces the count $n_k$. It is the number of population members component $k$ stands for, on the scale of $n_{\text{eff}}$.
+
+**Marginal pseudo-likelihood**, allocations summed out:
 
 $$
-\ell_w(\eta) = \sum_i w_i \log f_i(\eta) = \sum_i w_i \log \sum_k p_k\, \phi(y_i \mid \theta_k).
+\ell_w(\Theta) = \sum_{i=1}^{n} w_i \log f(y_i \mid \Theta) = \sum_{i=1}^{n} w_i \log \sum_{k=1}^{L} p_k\, \phi(y_i \mid \theta_k).
 $$
 
-The marginal one is the standard object in survey inference. Its maximiser is the design-consistent estimator of the population mixture [@binder1983variances], and the standard errors in Part II are built on it. Combined with the prior it defines the *marginal pseudo-posterior*
+The marginal version is the standard object in survey inference. Its maximiser is the design-consistent estimator of the population mixture [@binder1983variances], and the standard errors of Part II are built on it. Combined with the prior it defines the *marginal pseudo-posterior*
 
 $$
-\Pi_w(\eta) \propto \text{prior}(\eta) \prod_i f_i(\eta)^{w_i}.
+\Pi_w(\Theta \mid y) \propto \pi(\Theta) \prod_{i=1}^{n} f(y_i \mid \Theta)^{w_i}.
 $$
 
-The Gibbs sampler of the next chapter uses pieces of both: its updates of the component weights and parameters come from the complete-data version, and its allocation step is the one that belongs to the marginal version. This is the construction of WOLCA and SWOLCA for latent class models [@stephenson2024wolca; @wu2024swolca], applied here to Gaussian components. The repository file `pseudolikelihood_framework.md` compares the two in detail.
+The Gibbs sampler of the next chapter takes its updates of $p$ and $\theta_k$ from the complete-data version and its allocation step from the marginal version. This is the construction of WOLCA and SWOLCA for latent class models [@stephenson2024wolca; @wu2024swolca], applied here to Gaussian components. The repository file `pseudolikelihood_framework.md` compares the two in detail.
+
+## The prior
+
+The prior treats the component weights and the component parameters as independent, and the components as independent of each other:
+
+$$
+\pi(\Theta) = \pi(p) \prod_{k=1}^{L} \pi(\mu_k, \Sigma_k).
+$$
+
+### Component weights: a sparse Dirichlet
+
+$$
+p \sim \text{Dirichlet}(a, \dots, a), \qquad \pi(p) \propto \prod_{k=1}^{L} p_k^{\,a - 1}, \qquad a = \frac{\alpha_0}{L} = \frac{0.001}{10} = 10^{-4}.
+$$
+
+A Dirichlet with $a$ this small puts almost all of its mass on weight vectors where a few components carry everything and the rest are near zero. @rousseau2011asymptotic showed that when the mixture has more components than the truth and $a < d/2$, with $d$ the number of parameters per component, the posterior weight of the extra components goes to zero as $n$ grows. Here $d = P + P(P+1)/2 = 9$ for $P = 3$, so the condition holds by a wide margin.
+
+In practice the extra components end up with no people assigned to them. The number of non-empty components in a draw is then a count of the Gaussians the data need, which is not the same as the number of phenotypes (see @sec-phenotypes).
+
+### Component means and covariances: normal-inverse-Wishart
+
+Each component has a normal-inverse-Wishart (NIW) prior, written $(\mu_k, \Sigma_k) \sim \text{NIW}(m_0, \kappa_0, \nu_0, \Psi_0)$:
+
+$$
+\Sigma_k \sim \mathcal{W}^{-1}(\nu_0, \Psi_0), \qquad \mu_k \mid \Sigma_k \sim \mathcal{N}_P\!\left(m_0, \tfrac{1}{\kappa_0}\Sigma_k\right).
+$$
+
+Its density, which @sec-gibbs uses, is
+
+$$
+\pi(\mu_k, \Sigma_k) \propto
+\underbrace{|\Sigma_k|^{-(\nu_0 + P + 1)/2} \exp\!\Big\{-\tfrac{1}{2} \operatorname{tr}\!\big(\Psi_0 \Sigma_k^{-1}\big)\Big\}}_{\text{inverse-Wishart for } \Sigma_k}
+\;\cdot\;
+\underbrace{|\Sigma_k|^{-1/2} \exp\!\Big\{-\tfrac{\kappa_0}{2} (\mu_k - m_0)^\top \Sigma_k^{-1} (\mu_k - m_0)\Big\}}_{\text{normal for } \mu_k \text{ given } \Sigma_k} .
+$$
+
+The four hyperparameters each have a plain meaning, and the code sets them from the data so that they do not depend on the units of the biomarkers:
+
+| Hyperparameter | Meaning | Value in the code |
+| :--- | :--- | :--- |
+| $m_0$ | Prior centre of every component mean | Weighted mean of $y$: $m_0 = \sum_i w_i y_i / \sum_i w_i$ |
+| $\kappa_0$ | How many observations the prior on a mean is worth | $0.5$ |
+| $\nu_0$ | How many observations the prior on a covariance is worth | $P + 2$ |
+| $\Psi_0$ | Scale of the prior on a covariance | $(\nu_0 - P - 1)\, \operatorname{diag}(s_1^2, \dots, s_P^2)$, with $s_j^2$ the weighted variance of biomarker $j$ |
+
+The choice of $\nu_0$ and $\Psi_0$ follows from the mean of an inverse-Wishart, $E[\Sigma_k] = \Psi_0 / (\nu_0 - P - 1)$, which exists only when $\nu_0 > P + 1$. Taking $\nu_0 = P + 2$, the smallest integer that qualifies, makes the prior as weak as possible while still having a mean, and gives $\nu_0 - P - 1 = 1$. Then
+
+$$
+E[\Sigma_k] = \Psi_0 = \operatorname{diag}(s_1^2, \dots, s_P^2):
+$$
+
+a priori, a component is as spread out as the whole data set, with uncorrelated biomarkers. The data then shrink and correlate each occupied component. A component with no people assigned is drawn from this prior, so empty components wander over the whole range of the data.
+
+## The target of the sampler
+
+Putting the pieces together, the complete-data pseudo-posterior is
+
+$$
+\pi_w(\Theta, z \mid y) \propto
+\underbrace{\prod_{k=1}^{L} p_k^{\,a - 1}}_{\text{prior of } p}
+\prod_{k=1}^{L} \underbrace{\pi(\mu_k, \Sigma_k)}_{\text{NIW prior}}
+\prod_{i=1}^{n} \underbrace{\big[\, p_{z_i}\, \phi(y_i \mid \theta_{z_i}) \big]^{w_i}}_{\text{weighted likelihood}} .
+$$
+
+@sec-gibbs derives each full conditional from this expression.
 
 ## Check your understanding
 
-1. Why is the number of non-empty components not the number of phenotypes?
-2. What would change in the fit if every weight were multiplied by 10? What would not change?
+1. Why does introducing the allocations $z_i$ make the likelihood easier to work with?
+2. What is $E[\Sigma_k]$ under the prior, and why was $\nu_0 = P + 2$ chosen?
 3. Which pseudo-likelihood are the standard errors based on?
 
 ::: {.callout-tip collapse="true"}
 ## Answers
-1. A phenotype whose biomarkers are not Gaussian (skewed, for example) needs several Gaussian components to describe it.
-2. The sampler would behave as if it had ten times as much data: tighter draws and the prior mattering less. The sandwich standard errors would not change.
+1. Given the allocations, the likelihood is a product with no sums inside, and it splits into one factor for $p$ and one per component.
+2. $\Psi_0$, the diagonal of the weighted variances. $\nu_0 = P + 2$ is the smallest integer for which the inverse-Wishart has a mean, so the prior is as weak as possible while $E[\Sigma_k]$ exists.
 3. The marginal one, with the allocations summed out.
 :::

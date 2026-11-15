@@ -1,96 +1,187 @@
 # The Gibbs Sampler {#sec-gibbs}
 
-This chapter describes `fit_wdpmm` in `src/R/dpmm_fit.R`, the sampler behind every production result. It explains what each step does, where the survey weights enter, and why the allocation step is left unweighted.
+This chapter derives the sampler behind every production result, `fit_wdpmm` in `src/R/dpmm_fit.R`, from the pseudo-posterior of @sec-formulation. Each step is a full conditional distribution, derived explicitly.
 
 ## The idea of Gibbs sampling
 
-The posterior of a mixture is hard to sample directly, but it becomes easy once the problem is split. If we knew every person's allocation $z_i$, the component weights and parameters would have standard conjugate posteriors. If we knew the weights and parameters, each allocation would be a simple categorical draw.
+The pseudo-posterior $\pi_w(\Theta, z \mid y)$ is hard to sample directly, but each block of unknowns is easy to sample when the others are held fixed. A Gibbs sampler cycles through the blocks, drawing each from its *full conditional*, its distribution given everything else. Each pass is one *iteration*; after enough iterations the draws behave like draws from the target.
 
-A Gibbs sampler alternates between these easy pieces. Each pass through the steps is one *iteration*. After enough iterations the draws behave like draws from the target distribution, and the sequence of draws is the output.
-
-## One iteration
-
-Each iteration has three steps. The code runs them in this order.
-
-### Step 1: component weights
-
-Count the people in each component, weighting each person by $w_i$:
+The blocks here are the weights $p$, the allocations $z$, and the component parameters $\theta_1, \dots, \theta_L$. Throughout, recall the target from @sec-formulation:
 
 $$
-n_k^{(w)} = \sum_{i:\, z_i = k} w_i .
+\pi_w(\Theta, z \mid y) \propto
+\prod_{k=1}^{L} p_k^{\,a - 1}
+\;\prod_{k=1}^{L} \pi(\mu_k, \Sigma_k)
+\;\prod_{i=1}^{n} \big[\, p_{z_i}\, \phi(y_i \mid \theta_{z_i}) \big]^{w_i} .
 $$
 
-Then draw the weights from a Dirichlet that adds these counts to the prior:
+To find a full conditional, keep only the factors that contain the block being updated; everything else is a constant.
+
+## Step 1: the component weights $p$
+
+**Derivation.** The factors that contain $p$ are its prior and the $p_{z_i}^{w_i}$ terms of the likelihood. Grouping people by component, $\prod_i p_{z_i}^{w_i} = \prod_k p_k^{\,n_k^{(w)}}$ with $n_k^{(w)} = \sum_{i:\, z_i = k} w_i$. So
 
 $$
-p \sim \text{Dirichlet}\!\left(a + n_1^{(w)}, \dots, a + n_L^{(w)}\right), \qquad a = 10^{-4}.
+\pi(p \mid z) \propto \prod_{k=1}^{L} p_k^{\,a - 1} \prod_{k=1}^{L} p_k^{\,n_k^{(w)}} = \prod_{k=1}^{L} p_k^{\,a + n_k^{(w)} - 1},
 $$
 
-A component with no people has parameter $a = 10^{-4}$ and so gets a weight that is effectively zero. The C++ helper `sparse_dirichlet_weights_cpp` draws one Gamma variable per component and normalises them.
-
-### Step 2: allocations
-
-Each person is reassigned with probabilities proportional to component weight times density:
+which is the kernel of a Dirichlet distribution:
 
 $$
-\Pr(z_i = k \mid y_i, p, \theta) = r_{ik} = \frac{p_k\, \phi(y_i \mid \mu_k, \Sigma_k)}{\sum_{l=1}^{L} p_l\, \phi(y_i \mid \mu_l, \Sigma_l)} .
+p \mid z \sim \text{Dirichlet}\!\left(a + n_1^{(w)}, \dots, a + n_L^{(w)}\right).
 $$
 
-**The survey weight does not appear here.** This is deliberate and is discussed below. The computation is done on the log scale and normalised by the largest term, so very small densities do not underflow. `sample_z_cpp` draws all $n$ allocations at once.
+The Dirichlet prior is *conjugate*: the posterior is the prior with the weighted counts added to its parameters. A component with no people keeps parameter $a = 10^{-4}$ and gets a weight that is effectively zero.
 
-### Step 3: component means and covariances
+**Code.** `sparse_dirichlet_weights_cpp` draws $g_k \sim \text{Gamma}(a + n_k^{(w)}, 1)$ for each component and returns $p_k = g_k / \sum_l g_l$, the standard construction of a Dirichlet draw.
 
-For each component with people in it, compute the weighted mean and weighted scatter matrix of its members:
+### The posterior mean of $p$ and $n_{\text{eff}}$ {#sec-p-neff}
+
+For a Dirichlet with parameters $\beta_1, \dots, \beta_L$ and total $\beta_0 = \sum_k \beta_k$, the mean of component $k$ is $\beta_k / \beta_0$ and its variance is $E[p_k](1 - E[p_k]) / (\beta_0 + 1)$. Here $\beta_k = a + n_k^{(w)}$, and since the weights were rescaled to sum to $n_{\text{eff}}$ (@sec-weights),
 
 $$
-\bar y_k = \frac{1}{n_k^{(w)}} \sum_{i:\, z_i = k} w_i\, y_i, \qquad
+\beta_0 = \sum_{k=1}^{L} \big(a + n_k^{(w)}\big) = L a + \sum_{i=1}^{n} w_i = \alpha_0 + n_{\text{eff}} .
+$$
+
+Therefore, given the allocations,
+
+$$
+E[p_k \mid z] = \frac{a + n_k^{(w)}}{\alpha_0 + n_{\text{eff}}} \;\approx\; \frac{n_k^{(w)}}{n_{\text{eff}}} = \frac{\sum_{i:\, z_i = k} w_i}{\sum_i w_i},
+\qquad
+\operatorname{Var}(p_k \mid z) = \frac{E[p_k \mid z]\,\big(1 - E[p_k \mid z]\big)}{\alpha_0 + n_{\text{eff}} + 1} \;\approx\; \frac{\hat p_k (1 - \hat p_k)}{n_{\text{eff}}} .
+$$
+
+Two consequences:
+
+- **The mean is the weighted (Hájek) share** of the people in component $k$, up to $\alpha_0 = 0.001$, which is negligible. It does not depend on what the weights sum to, because rescaling all weights by a constant leaves their ratio unchanged.
+- **The spread is that of a proportion from $n_{\text{eff}}$ people.** That is Kish's approximation to the variance of a weighted proportion under unequal weights. Had the weights summed to $n$, the posterior variance would be $\hat p_k(1 - \hat p_k)/n$, too small by the factor $n / n_{\text{eff}}$, Kish's design effect for unequal weighting (about 1.9 in the second simulation design). The rescaling only changes how concentrated the draws are.
+
+The rescaling does *not* account for clustering: people in the same PSU are correlated, and the Dirichlet knows nothing about PSUs. That is why the reported standard errors come from the sandwich of Part II, not from the spread of the draws.
+
+## Step 2: the allocations $z$
+
+**What the complete-data pseudo-posterior implies.** The factors that contain $z_i$ are $[\,p_{z_i}\phi(y_i \mid \theta_{z_i})]^{w_i}$, so this target would give
+
+$$
+\Pr(z_i = k \mid \Theta, y) \propto \big[\, p_k\, \phi(y_i \mid \theta_k) \big]^{w_i}. \qquad \text{(not used)}
+$$
+
+**What the sampler uses instead.**
+
+$$
+\Pr(z_i = k \mid \Theta, y_i) = r_{ik} = \frac{p_k\, \phi(y_i \mid \theta_k)}{\sum_{l=1}^{L} p_l\, \phi(y_i \mid \theta_l)} ,
+$$
+
+the ordinary Bayes-rule probability that person $i$ came from component $k$, with no weight. This is the allocation that belongs to the *marginal* pseudo-posterior $\Pi_w$. Write $f_i = f(y_i \mid \Theta)$ and consider the augmented target
+
+$$
+q(\Theta, z) \propto \pi(\Theta) \prod_{i=1}^{n} f_i^{\,w_i}\, r_{i z_i} .
+$$
+
+Summing over each $z_i$ gives $\sum_k r_{ik} = 1$, so the $\Theta$-marginal of $q$ is exactly $\Pi_w(\Theta \mid y)$. And for fixed $\Theta$, $q$ is proportional to $\prod_i r_{iz_i}$, so its allocation conditional is exactly the unweighted $r_{ik}$. The unweighted allocation step is therefore the exact $z$-step for a target whose parameters follow $\Pi_w$.
+
+**Why it makes sense.** An allocation is a statement about one person: which component their biomarkers came from. It depends on their biomarkers, not on how likely they were to be sampled. A person with weight 5 is still one person with one set of biomarkers. Raising $r_{ik}$ to the power $w_i$ would make high-weight people almost deterministic in their assignment and tends to split real groups; an option that did this (`WEIGHT_Z`) was removed. WOLCA and SWOLCA also leave the allocation unweighted [@stephenson2024wolca; @wu2024swolca].
+
+**Code.** The log of $p_k \phi(y_i \mid \theta_k)$ is computed for all $i$ and $k$, the largest term in each row is subtracted to avoid underflow, and `sample_z_cpp` draws all $n$ allocations at once.
+
+## Step 3: the component parameters $(\mu_k, \Sigma_k)$
+
+**Derivation.** The factors that contain $\theta_k$ are its NIW prior and the weighted likelihood terms of the people in component $k$:
+
+$$
+\pi(\mu_k, \Sigma_k \mid z, y) \propto \pi(\mu_k, \Sigma_k) \prod_{i:\, z_i = k} \phi(y_i \mid \mu_k, \Sigma_k)^{w_i} .
+$$
+
+Write $N = n_k^{(w)}$, and define the weighted mean and weighted scatter matrix of the component's members:
+
+$$
+\bar y_k = \frac{1}{N} \sum_{i:\, z_i = k} w_i\, y_i, \qquad
 S_k = \sum_{i:\, z_i = k} w_i\, (y_i - \bar y_k)(y_i - \bar y_k)^\top .
 $$
 
-Then apply the standard normal-inverse-Wishart update, with $n_k^{(w)}$ in place of the usual count:
+*(a) The weighted likelihood.* Since $\phi(y_i \mid \mu, \Sigma)^{w_i} \propto |\Sigma|^{-w_i/2} \exp\{-\tfrac{w_i}{2}(y_i - \mu)^\top \Sigma^{-1}(y_i - \mu)\}$,
 
 $$
-\kappa_n = \kappa_0 + n_k^{(w)}, \qquad \nu_n = \nu_0 + n_k^{(w)}, \qquad
-m_n = \frac{\kappa_0 m_0 + n_k^{(w)} \bar y_k}{\kappa_n},
+\prod_{i:\, z_i = k} \phi(y_i \mid \mu_k, \Sigma_k)^{w_i} \propto |\Sigma_k|^{-N/2} \exp\Big\{-\tfrac{1}{2} \sum_{i:\, z_i = k} w_i (y_i - \mu_k)^\top \Sigma_k^{-1} (y_i - \mu_k)\Big\}.
+$$
+
+*(b) Split the sum.* Write $y_i - \mu_k = (y_i - \bar y_k) + (\bar y_k - \mu_k)$. The cross term vanishes because $\sum_{i:\, z_i = k} w_i (y_i - \bar y_k) = 0$ by the definition of $\bar y_k$. Using $x^\top A x = \operatorname{tr}(A\, x x^\top)$,
+
+$$
+\sum_{i:\, z_i = k} w_i (y_i - \mu_k)^\top \Sigma_k^{-1} (y_i - \mu_k) = \operatorname{tr}\!\big(S_k \Sigma_k^{-1}\big) + N (\bar y_k - \mu_k)^\top \Sigma_k^{-1} (\bar y_k - \mu_k).
+$$
+
+*(c) Combine the two quadratic forms in $\mu_k$.* The prior contributes $\kappa_0 (\mu_k - m_0)^\top \Sigma_k^{-1} (\mu_k - m_0)$ and the likelihood $N(\mu_k - \bar y_k)^\top \Sigma_k^{-1} (\mu_k - \bar y_k)$. Expanding both and completing the square, with $A = \Sigma_k^{-1}$,
+
+$$
+\kappa_0 (\mu - m_0)^\top A (\mu - m_0) + N (\mu - \bar y)^\top A (\mu - \bar y)
+= \kappa_n (\mu - m_n)^\top A (\mu - m_n) + \frac{\kappa_0 N}{\kappa_n} (\bar y - m_0)^\top A (\bar y - m_0),
+$$
+
+where
+
+$$
+\kappa_n = \kappa_0 + N, \qquad m_n = \frac{\kappa_0\, m_0 + N\, \bar y_k}{\kappa_n} .
+$$
+
+(Check: the $\mu^\top A \mu$ terms give $(\kappa_0 + N)\,\mu^\top A \mu$; the linear terms give $-2\mu^\top A(\kappa_0 m_0 + N \bar y)= -2\kappa_n\, \mu^\top A m_n$; and the constants left over are $\kappa_0 m_0^\top A m_0 + N \bar y^\top A \bar y - \kappa_n m_n^\top A m_n = \tfrac{\kappa_0 N}{\kappa_n}(\bar y - m_0)^\top A (\bar y - m_0)$.)
+
+*(d) Collect terms.* Multiplying the prior density of @sec-formulation by (a), and using (b) and (c):
+
+$$
+\pi(\mu_k, \Sigma_k \mid z, y) \propto
+|\Sigma_k|^{-(\nu_0 + N + P + 1)/2} \exp\!\Big\{-\tfrac{1}{2} \operatorname{tr}\!\Big[\Big(\Psi_0 + S_k + \tfrac{\kappa_0 N}{\kappa_n} (\bar y_k - m_0)(\bar y_k - m_0)^\top\Big) \Sigma_k^{-1}\Big]\Big\}
+\cdot |\Sigma_k|^{-1/2} \exp\!\Big\{-\tfrac{\kappa_n}{2} (\mu_k - m_n)^\top \Sigma_k^{-1} (\mu_k - m_n)\Big\}.
+$$
+
+This has exactly the form of the NIW density, so the posterior is NIW with updated hyperparameters:
+
+$$
+(\mu_k, \Sigma_k) \mid z, y \sim \text{NIW}(m_n, \kappa_n, \nu_n, \Psi_n),
 $$
 
 $$
-\Psi_n = \Psi_0 + S_k + \frac{\kappa_0\, n_k^{(w)}}{\kappa_n}(\bar y_k - m_0)(\bar y_k - m_0)^\top,
+\boxed{\;
+\kappa_n = \kappa_0 + N, \quad
+\nu_n = \nu_0 + N, \quad
+m_n = \frac{\kappa_0 m_0 + N \bar y_k}{\kappa_n}, \quad
+\Psi_n = \Psi_0 + S_k + \frac{\kappa_0 N}{\kappa_n} (\bar y_k - m_0)(\bar y_k - m_0)^\top ,
+\qquad N = n_k^{(w)} .
+\;}
 $$
 
-and draw
+**Reading the updated hyperparameters.**
 
-$$
-\Sigma_k \sim \mathcal{W}^{-1}(\nu_n, \Psi_n), \qquad \mu_k \mid \Sigma_k \sim \mathcal{N}_P\!\left(m_n, \Sigma_k / \kappa_n\right).
-$$
-
-A component with no people is drawn from the prior instead.
-
-Two safeguards apply. Every drawn covariance has its eigenvalues raised to at least 0.05 (`floor_eigen`), so a component cannot collapse onto a few nearly identical people. If a draw fails numerically, the code substitutes a safe value and counts the event (`n_dens_fallback`, `n_sigma_fallback`), so failures are recorded rather than silent.
-
-## Where the survey weights enter
-
-| Step | Weighted? | How |
+| Updated | Prior + data | Meaning |
 | :--- | :--- | :--- |
-| Component weights $p$ | Yes | Weighted counts $n_k^{(w)}$ |
-| Allocations $z$ | **No** | $r_{ik} \propto p_k\, \phi(y_i \mid \theta_k)$ |
-| Means and covariances | Yes | Weighted mean, weighted scatter, $n_k^{(w)}$ as the count |
+| $\kappa_n$ | $\kappa_0 + n_k^{(w)}$ | Observations behind the mean: prior worth plus weighted count |
+| $\nu_n$ | $\nu_0 + n_k^{(w)}$ | Observations behind the covariance |
+| $m_n$ | Weighted average of $m_0$ and $\bar y_k$ | The data mean, pulled slightly towards the prior centre; with $\kappa_0 = 0.5$ and hundreds of people the pull is negligible |
+| $\Psi_n$ | $\Psi_0$ + within scatter + between term | Prior scale, plus the weighted spread inside the component, plus a term for how far the component mean lies from $m_0$ |
 
-### Why the allocation step is not weighted
+The survey weights enter only through $n_k^{(w)}$, $\bar y_k$ and $S_k$; the formulas are the usual conjugate ones with weighted counts in place of counts. $n_k^{(w)}$ need not be an integer, which is fine: an inverse-Wishart needs only $\nu_n > P - 1$.
 
-Each person's allocation answers a question about that person: which component did their biomarkers come from? The answer depends on their biomarkers and the current components, not on how likely they were to be sampled. A person with weight 5 is still one person with one set of biomarkers.
+**Drawing from it.** First $\Sigma_k \sim \mathcal{W}^{-1}(\nu_n, \Psi_n)$, then $\mu_k \mid \Sigma_k \sim \mathcal{N}_P(m_n, \Sigma_k / \kappa_n)$. A component with no people is drawn from the prior $\text{NIW}(m_0, \kappa_0, \nu_0, \Psi_0)$.
 
-What the weight changes is how much that person counts when summarising the population: in the share of the population each component holds, and in the population mean and covariance of each component. Those are exactly Steps 1 and 3.
+**Two safeguards in the code.** Every drawn covariance has its eigenvalues raised to at least 0.05 (`floor_eigen`), so a component cannot collapse onto a few nearly identical people. If a draw fails numerically, the code substitutes a safe value and counts the event (`n_dens_fallback`, `n_sigma_fallback`), so failures are recorded rather than silent.
 
-This is the construction used by WOLCA and SWOLCA for survey-weighted latent class models [@stephenson2024wolca; @wu2024swolca]; their published code also leaves the allocation unweighted. It has the same shape as weighted EM for the marginal pseudo-likelihood of @sec-two-pl: unweighted membership probabilities in the E-step, weighted updates in the M-step.
+## One iteration, in the order the code runs it
 
-Raising the allocation probabilities to the power $w_i$ instead would make high-weight people almost deterministic in their assignment and tends to split real groups. An option that did this (`WEIGHT_Z`) existed earlier and was removed.
+1. Draw $p \mid z$ from the Dirichlet of Step 1.
+2. Draw every $z_i \mid p, \theta, y_i$ from the unweighted probabilities $r_{ik}$ of Step 2.
+3. For every component, draw $(\mu_k, \Sigma_k) \mid z, y$ from the NIW of Step 3, or from the prior if it is empty.
 
-## What the sampler targets, and the exact alternatives
+| Step | Weighted? | Where the weights enter |
+| :--- | :--- | :--- |
+| $p$ | Yes | Weighted counts $n_k^{(w)}$ |
+| $z$ | **No** | — |
+| $(\mu_k, \Sigma_k)$ | Yes | $n_k^{(w)}$, weighted mean, weighted scatter |
 
-Because the allocation step is unweighted while the other steps are weighted, the Gibbs sampler is not an exact sampler of the marginal pseudo-posterior $\Pi_w$. Two exact samplers exist in the code to check whether that matters:
+## How close is this to the marginal pseudo-posterior?
 
-- **Metropolis–Hastings correction** (`fit_wdpmm_mh`, `SAMPLER=mh`). It uses the Gibbs update as a proposal and accepts or rejects it so that the chain targets $\Pi_w$ exactly.
+Steps 1 and 3 come from the complete-data pseudo-posterior; Step 2 comes from the augmented target $q$ of the marginal one. Under $q$, the conditional of $\Theta$ given $z$ is the Dirichlet-times-NIW of Steps 1 and 3 multiplied by an extra factor $\prod_i r_{iz_i}^{\,1 - w_i}$. The Gibbs sampler drops that factor, so it is not an exact sampler of $\Pi_w$. Two exact samplers in the code check whether that matters:
+
+- **Metropolis–Hastings correction** (`fit_wdpmm_mh`, `SAMPLER=mh`). It proposes $\Theta$ from Steps 1 and 3 and accepts with probability based on the dropped factor, so the chain targets $\Pi_w$ exactly.
 - **Hamiltonian Monte Carlo** (`src/stan/pi_w.stan`, run by `src/R/hmc_fit.R`). It samples $\Pi_w$ with the allocations summed out, then draws allocations from each draw.
 
 On 1,000 replicates of the base scenario of the main simulation design, the Gibbs sampler and its exact MH correction gave the same results to the third decimal:
@@ -102,7 +193,7 @@ On 1,000 replicates of the base scenario of the main simulation design, the Gibb
 | Coverage (%), Gibbs | 95.0 | 93.1 | 94.6 | 94.2 |
 | Coverage (%), exact MH | 95.1 | 93.1 | 94.6 | 94.1 |
 
-(Files `simulations/summaries/summary_pi_w_check_{gibbs,mh}_neff.csv`.) So in this setting the approximation in the Gibbs allocation step does not change the answer, and the faster sampler is used everywhere. The HMC sampler is much slower: on one sample of the second design (about 4,800 people) its warm-up alone took more than 100 minutes, against about 2 minutes for a full Gibbs fit.
+(Files `simulations/summaries/summary_pi_w_check_{gibbs,mh}_neff.csv`.) In this setting the dropped factor does not change the answer, so the faster Gibbs sampler is used everywhere. HMC is far slower: on one sample of the second design (about 4,800 people) its warm-up alone took more than two hours, against about 2 minutes for a full Gibbs fit.
 
 ## Run settings
 
@@ -126,13 +217,15 @@ The components have no fixed identity: component 3 in one draw may describe the 
 
 ## Check your understanding
 
-1. In Step 1, what weight does a component with no people get, and why?
-2. A person with weight 10 and a person with weight 1 have identical biomarkers. Do they have the same allocation probabilities? Do they contribute equally to $\bar y_k$?
-3. Why does the pipeline not need to relabel the components across draws?
+1. Show that the Dirichlet parameters sum to $\alpha_0 + n_{\text{eff}}$. What would they sum to if the weights summed to $n$, and how would that change the draws of $p$?
+2. In Step 3, why does the cross term vanish when the sum is split around $\bar y_k$?
+3. A component holds 400 people with weighted count 210. What are $\kappa_n$ and $\nu_n$ for $P = 3$?
+4. A person with weight 10 and a person with weight 1 have identical biomarkers. Do they have the same allocation probabilities? Do they contribute equally to $\bar y_k$?
 
 ::: {.callout-tip collapse="true"}
 ## Answers
-1. Effectively zero: its Dirichlet parameter is only $a = 10^{-4}$, with no counts added.
-2. Same allocation probabilities, because Step 2 does not use the weights. In $\bar y_k$ the first counts ten times as much as the second.
-3. Phenotypes are defined from people, not from component labels, and the mapping from components to phenotypes is recomputed in each draw.
+1. $\sum_k (a + n_k^{(w)}) = La + \sum_i w_i = \alpha_0 + n_{\text{eff}}$. With weights summing to $n$ it would be $\alpha_0 + n$: the same mean, but variance smaller by about $n / n_{\text{eff}}$, so the draws of $p$ would be too concentrated.
+2. Because $\bar y_k$ is the weighted mean, $\sum w_i (y_i - \bar y_k) = 0$, and the cross term is $2(\bar y_k - \mu_k)^\top \Sigma_k^{-1} \sum w_i (y_i - \bar y_k)$.
+3. $\kappa_n = 0.5 + 210 = 210.5$ and $\nu_n = 5 + 210 = 215$. The count is the weighted count, not 400.
+4. Same allocation probabilities, because Step 2 does not use the weights. In $\bar y_k$ the first counts ten times as much as the second.
 :::
