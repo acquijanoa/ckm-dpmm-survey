@@ -1,46 +1,51 @@
 # Preface {.unnumbered}
 
-This text provides a self-contained, mathematically rigorous, and fully reproducible presentation of the **Survey-Weighted Dirichlet Process Mixture Model (DPMM)** with **Stratified Cluster Jackknife Variance Estimation** and **Affine Posterior Projection**.
+This book explains the method in this repository as the code runs it today (state of 14 November 2026). The method finds subgroups of people (phenotypes) in biomarker data from a complex survey and estimates what share of the population each phenotype makes up, with a confidence interval that respects the survey design.
 
-The primary objective is to recover latent subpopulations (phenotypes or disease subtypes) and estimate their finite-population prevalences from complex survey samples—such as stratified, multistage area-probability health surveys—while achieving **calibrated nominal 95% inferential coverage**.
+The earlier version of this book (September 2026) described a pipeline that has since been replaced in several places. The table at the end of this preface lists what changed.
 
----
+## The method in one page
 
-## Methodological Overview
+The data are $n$ sampled people. Person $i$ has a vector of $P$ continuous biomarkers $y_i$, a survey weight $w_i$, a stratum and a primary sampling unit (PSU).
 
-Standard Bayesian nonparametric mixture models fit to complex survey data encounter two major challenges:
-1. **Selection Bias & Component Fragmentation:** Under unequal-probability sampling, naive likelihood exponentiation ($w_i$-weighting at the individual level) can fragment true clusters and inflate active component counts. The method presented here uses an **unweighted-allocation rule with survey-weighted aggregate updates** under a sparse Dirichlet prior, which automatically empties superfluous components and targets the population mixture.
-2. **Cluster Correlation & Uncertainty Calibration:** Complex multistage clustering inflates sampling variability. Standard Bayesian pseudo-posteriors are artificially overconfident. This method employs a **raw-mixture marginal pseudolikelihood Godambe sandwich** where the meat matrix is estimated via a **stratified cluster (delete-PSU) jackknife**, recombined with posterior MCMC mixing uncertainty, and projected via an affine Cholesky transformation to restore nominal coverage.
+The pipeline has three steps. Each has its own part of the code and its own chapters.
 
----
+1. **Fit an overfitted Gaussian mixture with a Gibbs sampler** (@sec-formulation, @sec-gibbs). The mixture has more components than needed ($L = 10$ in the simulations, $L = 20$ for NHANES). A sparse prior on the component weights empties the components the data do not need. The survey weights enter as weighted counts and weighted means and covariances.
+2. **Merge the components into phenotypes** (@sec-phenotypes). One phenotype can use several Gaussian components, for example when its biomarkers are skewed. FOLD groups the components into phenotypes. Each posterior draw then gives every person a phenotype, and the weighted share of each phenotype in that draw is one draw of its prevalence. The estimate is the average over draws.
+3. **Compute design-based standard errors** (@sec-score-hessian, @sec-jackknife). The Gibbs draws do not know about strata and PSUs, so their spread is not a valid standard error. The standard errors come from a Godambe sandwich: the Hessian of the weighted mixture log-likelihood, and the between-PSU variation of the score within strata. Intervals use a $t$ distribution with (PSUs $-$ strata) degrees of freedom.
 
-## Mathematical Notation
+@sec-simulations reports how well this works in simulation, and @sec-codebook is a map of the code.
 
-Throughout this book, we adopt standard survey sampling and Bayesian nonparametric notation:
+## Notation
 
-| Symbol | Description |
+| Symbol | Meaning |
 | :--- | :--- |
-| $\mathcal{U}$ | Finite target population of size $N$. |
-| $h = 1, \dots, H$ | Strata in the sampling design. |
-| $i = 1, \dots, N_h$ | Primary Sampling Units (PSUs / clusters) in stratum $h$. |
-| $j = 1, \dots, M_{hi}$ | Secondary elements (individuals) within PSU $(h, i)$. |
-| $n = \sum_{h=1}^H \sum_{i=1}^{n_h} m_{hi}$ | Realized complex sample size ($n \ll N$). |
-| $\pi_{hij}$ | Joint inclusion probability $\text{Pr}(j \in \text{sample})$. |
-| $w_{hij} = 1 / \pi_{hij}$ | Design weight, normalized such that $\sum_{i=1}^n w_i = n$. |
-| $Y_i \in \mathbb{R}^P$ | $P$-dimensional continuous biomarker vector for unit $i$. |
-| $z_i \in \{1, \dots, L\}$ | Latent component allocation indicator. |
-| $K_0$ | Number of true active population phenotypes ($K_0 < L$). |
-| $\pi = (\pi_1, \dots, \pi_{K_0})^\top$ | Population phenotype prevalence vector ($\sum_{k=1}^{K_0} \pi_k = 1$). |
-| $H_{\hat\pi}$ | Analytical profile Hessian (bread matrix) of the marginal pseudolikelihood. |
-| $J_{\text{jack}}$ | Stratified delete-PSU jackknife covariance (meat matrix). |
-| $\Sigma_{\text{sandwich}}$ | Cluster-calibrated sandwich covariance matrix. |
-| $\Sigma_{\text{naive}}$ | Empirical MCMC posterior covariance matrix across Gibbs iterations. |
-| $\Sigma_{\text{corrected}}$ | Total recombined covariance ($\Sigma_{\text{sandwich}} + \Sigma_{\text{naive}}$). |
+| $i = 1, \dots, n$ | Sampled people. |
+| $y_i \in \mathbb{R}^P$ | Biomarker vector of person $i$. |
+| $w_i$ | Survey weight of person $i$, the inverse of the probability of being sampled, rescaled (see @sec-weights). |
+| $k = 1, \dots, L$ | Mixture components (the Gaussians the sampler fits). |
+| $p_k$ | Weight of component $k$; $\sum_k p_k = 1$. |
+| $\theta_k = (\mu_k, \Sigma_k)$ | Mean and covariance of component $k$. |
+| $z_i \in \{1, \dots, L\}$ | Allocation: the component person $i$ is assigned to in a draw. |
+| $\phi(y \mid \theta_k)$ | Gaussian density of component $k$. |
+| $g = 1, \dots, \hat K$ | Phenotypes, after merging components. |
+| $\pi_g$ | Prevalence of phenotype $g$ in the population. This is the estimand. |
+| $K_0$ | True number of phenotypes (known only in simulation). |
+| $H$, $M$ | Number of strata and of sampled PSUs. |
 
----
+The mixture weights $p_k$ and the phenotype prevalences $\pi_g$ are different things: there are $L$ of the first and $\hat K$ of the second. The earlier version of the book wrote both as $\pi$.
 
-## Structure of the Book
+## What changed since the September 2026 version
 
-* **Part I: The Survey-Weighted DPMM** develops the model formulation, the overfitted mixture representation, the unweighted allocation / weighted aggregate update rule, and the C++ Gibbs sampler with zero-waste full-chain draw retention.
-* **Part II: Survey-Calibrated Uncertainty Quantification** derives the marginal sub-mixture score equations, the analytical profile Hessian, the stratified cluster jackknife, and the Williams–Savitsky affine Cholesky transformation.
-* **Part III: Simulation Benchmark & Implementation** presents the 1,000-replicate Monte Carlo benchmark confirming nominal 95% coverage, along with the complete production R and C++ reference code.
+| Topic | September 2026 | Now |
+| :--- | :--- | :--- |
+| Sparse prior | $\alpha_0 = 1$, so $\alpha_0 / L = 0.1$ | $\alpha_0 = 0.001$, so $\alpha_0 / L = 10^{-4}$ |
+| Prior strength on the means | $\kappa_0 = 0.01$ | $\kappa_0 = 0.5$ |
+| Weights in the sampler | Sum to $n$ | Sum to Kish's effective sample size |
+| Label switching | Stephens relabelling | None needed (@sec-phenotypes) |
+| Merging | Truth-based merge, or `maxpear` with thresholds | FOLD; the truth-based merge was removed |
+| Sandwich | Prevalences only, component densities held fixed | All parameters of a $\hat K$-component mixture (prevalences, means, covariances) |
+| Interval | Sandwich plus the Gibbs covariance, then an affine projection of the draws | Estimate $\pm\, t \times$ sandwich SE; no recombination, no projection |
+| Simulation designs | One design, 4 PSUs per stratum | Two designs; the second has 2 PSUs per stratum and informative PSU sizes |
+
+The old chapter on total-variance recombination and affine projection was removed because the code no longer does either. It remains in the git history of the `book/` folder.

@@ -4,24 +4,24 @@ project:
 
 book:
   title: "Survey-Weighted Dirichlet Process Mixture Models"
-  subtitle: "Theory, Stratified Jackknife Variance Estimation, and Calibrated Inference"
+  subtitle: "Gibbs Sampling, Merging Components into Phenotypes, and Design-Based Inference"
   author: "Aquijano"
   date: today
   chapters:
     - index.qmd
 
-    - part: "Part I: The Survey-Weighted DPMM"
+    - part: "Part I: The Survey-Weighted Mixture"
       chapters:
         - 01-dpmm-survey-formulation.qmd
-        - 02-mcmc-and-relabeling.qmd
+        - 02-gibbs-sampler.qmd
+        - 03-components-to-phenotypes.qmd
 
-    - part: "Part II: Survey-Calibrated Uncertainty Quantification"
+    - part: "Part II: Design-Based Uncertainty"
       chapters:
-        - 03-marginal-score-hessian.qmd
-        - 04-stratified-cluster-jackknife.qmd
-        - 05-total-variance-projection.qmd
+        - 04-marginal-score-hessian.qmd
+        - 05-stratified-cluster-jackknife.qmd
 
-    - part: "Part III: Simulation Benchmark & Implementation"
+    - part: "Part III: Simulations and Implementation"
       chapters:
         - 06-simulation-benchmarks.qmd
         - 07-computational-codebook.qmd

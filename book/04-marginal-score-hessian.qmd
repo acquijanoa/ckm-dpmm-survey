@@ -1,0 +1,88 @@
+# The Sandwich: Score and Hessian {#sec-score-hessian}
+
+The Gibbs draws give a prevalence estimate, but their spread is not a valid standard error. The sampler treats the people as independent and knows nothing about strata or PSUs, so it misses the extra variation from cluster sampling. This chapter and the next build the standard error from the survey design instead. The code is `godambe_sandwich`, `sandwich_core` and `unit_scores` in `src/R/dpmm_fit.R`.
+
+## The idea of a sandwich
+
+An estimator defined by setting a sum of per-person scores to zero, $\sum_i s_i(\eta) = 0$, has approximate variance
+
+$$
+V = H^{-1} J H^{-1},
+$$
+
+where $H$ is the derivative of the score total (how sharply the estimating equation pins down $\eta$) and $J$ is the variance of the score total under repeated sampling from the population [@binder1983variances]. $H$ is the *bread* and $J$ the *meat*. When the model is right and the people are independent, $J = H$ and $V$ reduces to the usual inverse information. With survey data, $J$ is estimated from the design, which is how the clustering enters (@sec-jackknife).
+
+## Which model the sandwich uses
+
+The sandwich is evaluated on a mixture with **one Gaussian per phenotype**:
+
+$$
+m_i(\eta) = \sum_{g=1}^{\hat K} \pi_g\, \phi(y_i \mid \mu_g, \Sigma_g),
+$$
+
+at the values from @sec-phenotypes: the prevalence estimates $\hat\pi_g$ and each phenotype's posterior-mean weighted mean $\mu_g$ and covariance $\Sigma_g$. The parameter vector holds all of them:
+
+$$
+\eta = \big(\pi_1, \dots, \pi_{\hat K - 1},\; \mu_1, \operatorname{vech}\Sigma_1,\; \dots,\; \mu_{\hat K}, \operatorname{vech}\Sigma_{\hat K}\big),
+$$
+
+with $\pi_{\hat K} = 1 - \sum_{g < \hat K} \pi_g$ and $\operatorname{vech}$ the distinct entries of a covariance matrix.
+
+Including the means and covariances matters. The uncertainty in where a phenotype sits feeds into its prevalence, because it moves people between phenotypes. A sandwich for the prevalences alone, holding the densities fixed, would miss that.
+
+This is the marginal pseudo-likelihood of @sec-two-pl, written for phenotypes instead of components:
+
+$$
+\ell_w(\eta) = \sum_i w_i \log m_i(\eta).
+$$
+
+## The per-person score
+
+Person $i$'s score is $s_i = w_i \nabla_\eta \log m_i(\eta)$. With $\phi_{ig} = \phi(y_i \mid \mu_g, \Sigma_g)$, membership probabilities $r_{ig} = \pi_g \phi_{ig} / m_i$ and $D_{ig} = \Sigma_g^{-1}(y_i - \mu_g)$, its blocks are:
+
+| Parameter | Score block (before multiplying by $w_i$) |
+| :--- | :--- |
+| $\pi_g$, $g < \hat K$ | $(\phi_{ig} - \phi_{i\hat K}) / m_i$ |
+| $\mu_g$ | $r_{ig}\, D_{ig}$ |
+| $\Sigma_g$, entry $(a, b)$ | $r_{ig} \cdot \tfrac{1}{2}\left[D_{ig,a} D_{ig,b} - (\Sigma_g^{-1})_{ab}\right]$, doubled for $a \ne b$ |
+
+The prevalence block comes from $\partial m_i / \partial \pi_g = \phi_{ig} - \phi_{i\hat K}$, since raising $\pi_g$ lowers $\pi_{\hat K}$ by the same amount. The other blocks are the usual Gaussian scores, each weighted by how much person $i$ belongs to phenotype $g$.
+
+## The Hessian
+
+$H$ is the negative derivative of the score total $\sum_i s_i(\eta)$. The code computes it numerically: each parameter is moved up and down by a small step ($10^{-5}$ times its size, at least $10^{-5}$), the change in the score total is recorded, and the resulting matrix is made symmetric:
+
+$$
+H = -\tfrac{1}{2}\left(\hat{\mathcal J} + \hat{\mathcal J}^\top\right), \qquad \hat{\mathcal J}_{\cdot j} = \frac{\sum_i s_i(\eta + h_j e_j) - \sum_i s_i(\eta - h_j e_j)}{2 h_j}.
+$$
+
+A numerical derivative avoids deriving and coding the second derivatives for every pair of blocks.
+
+## When the standard errors are flagged
+
+The sandwich needs $H$ to be invertible and well conditioned. The code returns missing standard errors with a reason (`se_flag`) when:
+
+| Flag | Cause |
+| :--- | :--- |
+| `one phenotype` | Only one group; no prevalence to estimate |
+| `singular: ...` | A matrix could not be inverted |
+| `ill-conditioned H` | The reciprocal condition number of $H$ is below $10^{-10}$ |
+| `unstable SE` | A standard error is not finite or exceeds 0.5, the largest possible SD of a proportion |
+
+Flags are rare when the phenotypes are distinct and common when two phenotypes overlap heavily (156 of 1,000 overlap replicates in the second design), because the data then hardly separate their prevalences, and $H$ is close to singular.
+
+## Two approximations to keep in mind
+
+- **The estimate is not exactly the root of the score.** $\hat\pi$ is a posterior mean of per-draw shares, not the maximiser of $\ell_w$, so the score total at $\hat\eta$ is close to zero but not exactly zero. This is the same convention as @williamssavitsky2021uncertainty.
+- **The sandwich model can be simpler than the fitted one.** The sampler may use several Gaussians for one phenotype; the sandwich uses one. For a skewed phenotype the one-Gaussian model is misspecified, which may explain why standard errors are less accurate in the skew scenario. This has not been tested directly.
+
+## Check your understanding
+
+1. Why does the sandwich include the phenotype means and covariances, when only prevalences are reported?
+2. Why are some overlap replicates flagged?
+
+::: {.callout-tip collapse="true"}
+## Answers
+1. Uncertainty about where phenotypes sit moves people between them and so changes the prevalences; leaving it out would understate the standard errors.
+2. When phenotypes overlap heavily, the data barely distinguish them, so $H$ is nearly singular and the sandwich is unstable.
+:::

@@ -1,0 +1,68 @@
+# The Meat: Between-PSU Variation {#sec-jackknife}
+
+The meat $J$ of the sandwich is the variance of the score total under repeated sampling. This is where the survey design enters. The code is the second half of `sandwich_core` and the C++ helper `jackknife_sandwich_cpp`.
+
+## Why the design matters
+
+Surveys such as NHANES sample in stages: strata first, then a few primary sampling units (PSUs, e.g. counties) within each stratum, then people within each PSU. People in the same PSU tend to resemble each other, so a sample of 5,000 people from 100 PSUs carries less information than 5,000 independent people. The precision is driven largely by the number of PSUs.
+
+Standard survey variance estimation therefore works with PSU totals and compares PSUs within each stratum.
+
+## The estimator
+
+1. **Sum the scores within each PSU.** For stratum $h$ and PSU $j$, let $t_{hj} = \sum_{i \in (h, j)} s_i(\hat\eta)$ be the total of the per-person scores from @sec-score-hessian.
+2. **Compare PSUs within each stratum.** With $n_h$ sampled PSUs in stratum $h$ and $\bar t_h$ their mean,
+
+$$
+J = \sum_{h=1}^{H} \frac{n_h}{n_h - 1} \sum_{j=1}^{n_h} \left(t_{hj} - \bar t_h\right)\left(t_{hj} - \bar t_h\right)^\top .
+$$
+
+This is the *ultimate-cluster* variance estimator. For a total, it equals the stratified delete-one-PSU jackknife [@raowu1988resampling]. A stratum with a single sampled PSU contributes nothing, since one PSU has no between-PSU variation to measure.
+
+The between-person variation inside a PSU is not computed separately: it is already contained in the variation of the PSU totals.
+
+## From $J$ to standard errors
+
+$$
+V_\eta = H^{-1} J H^{-1}.
+$$
+
+The prevalence block of $V_\eta$ covers $\pi_1, \dots, \pi_{\hat K - 1}$. The last prevalence is $1 - \sum_{g < \hat K}\pi_g$, so the full covariance is
+
+$$
+V_\pi = B\, V_{\pi_{-\hat K}}\, B^\top, \qquad B = \begin{pmatrix} I_{\hat K - 1} \\ -\mathbf{1}^\top \end{pmatrix},
+$$
+
+and the standard error of $\hat\pi_g$ is $\sqrt{(V_\pi)_{gg}}$.
+
+**Rescaling the weights does not change the result.** Multiplying every $w_i$ by $c$ multiplies the scores, and so $H$, by $c$, and $J$ by $c^2$; the factors cancel in $H^{-1} J H^{-1}$. The choice of weight total in @sec-weights affects the Gibbs draws, not the standard errors.
+
+## The interval
+
+$$
+\hat\pi_g \pm t_{0.975,\, \text{df}} \times \text{SE}(\hat\pi_g), \qquad \text{df} = M - H,
+$$
+
+with $M$ the number of sampled PSUs and $H$ the number of strata, the usual design degrees of freedom. The two simulation designs give:
+
+| Design | Strata | PSUs | df | $t_{0.975}$ |
+| :--- | :---: | :---: | :---: | :---: |
+| Main (4 PSUs per stratum) | 50 | 200 | 150 | 1.976 |
+| psusize (2 PSUs per stratum) | 50 | 100 | 50 | 2.009 |
+
+With 2 PSUs per stratum, as in NHANES, the degrees of freedom are small and the $t$ quantile is noticeably above 1.96.
+
+## What the pipeline does not do
+
+The earlier version of this book added the spread of the Gibbs draws to the sandwich covariance and then rotated the draws to match the total (an affine projection). The code does neither. The interval uses the sandwich alone, and the simulations (@sec-simulations) show this gives close to 95% coverage when $\hat K$ is right.
+
+## Check your understanding
+
+1. Why does the estimator use PSU totals instead of individual scores?
+2. With 2 PSUs per stratum and 50 strata, what are the degrees of freedom, and why does that matter?
+
+::: {.callout-tip collapse="true"}
+## Answers
+1. People within a PSU are correlated; the variation of PSU totals captures both the within-PSU and the between-PSU parts of the variance.
+2. 100 − 50 = 50. With few degrees of freedom, the variance estimate is itself noisy, so the interval uses a $t$ quantile (2.009) instead of 1.96.
+:::

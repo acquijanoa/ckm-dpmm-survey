@@ -1,0 +1,65 @@
+# From Components to Phenotypes {#sec-phenotypes}
+
+The sampler of @sec-gibbs describes the data with Gaussian components. A phenotype is a group of people, and one phenotype can need several components: a skewed group, for instance, is fitted by two or three Gaussians side by side. This chapter covers how the components are merged into phenotypes with FOLD and how the prevalence estimates are formed. The code is `summarize_phenotypes` and the functions it calls in `src/R/dpmm_fit.R`.
+
+## Overview
+
+1. **Choose one partition of the people** into $\hat K$ groups with FOLD.
+2. **Map each draw onto that partition.** In every draw, each component joins the group that holds most of its members' weight. Each person then has a phenotype in every draw.
+3. **Compute prevalences.** In each draw, the prevalence of phenotype $g$ is its weighted share of the sample. The estimate is the average over draws.
+
+## Step 1: FOLD
+
+FOLD, *Fusing of Localized Densities* [@dombowsky2025fold], merges people whose components are close as densities. It is selected with `MERGE=fold_unweighted` (or `fold`, see below).
+
+1. **Distances between people.** For every pair of people, $\Delta_{ij}$ is the posterior mean, over draws, of the Hellinger distance between the Gaussian components they are assigned to. It is 0 when they share a component and close to 1 when their components barely overlap. Because the sampler does not keep component parameters, each draw's means and covariances are re-drawn from their conditional distribution given that draw's allocations (`fold_hellinger_draws`).
+2. **A tree of merges.** Build an average-linkage hierarchical tree on $\Delta$. In the paper's decision-theoretic setup, merging two clusters lowers the expected loss when their average distance is below a threshold $\gamma$, which is exactly an average-linkage cut.
+3. **Cut the tree.** The cut gives the partition and so $\hat K$. Two cuts are in use:
+
+| Cut | Rule | Status |
+| :--- | :--- | :--- |
+| $\gamma_{\text{AVG}}$ | Cut at the mean of $\Delta_{ij}$ over all pairs; the paper's default | Being tested (`FOLD_CUT=avg`) |
+| Height gap | Cut below the largest gap between consecutive merge heights | Current default (`FOLD_CUT=gap`) |
+
+The paper's authors use $\gamma_{\text{AVG}}$ in their simulations and, for real data, read off a plot of $r$, the share of the total distance that stays within clusters, by eye. Which cut to adopt is decided on the simulations (@sec-simulations).
+
+`fold_unweighted` weights all pairs of people equally; `fold` weights each pair by $w_i w_j$. The unweighted version is the one in use.
+
+## Step 2: mapping each draw onto the partition
+
+The partition from Step 1 is a single grouping of the people. To carry the posterior uncertainty through, each draw is mapped onto it. For draw $t$ and component $k$, find which group $g$ holds the largest share of the weight of the people in component $k$, and assign the whole component to that group:
+
+$$
+g^{(t)}(k) = \arg\max_g \sum_{i:\, z_i^{(t)} = k,\; i \in g} w_i .
+$$
+
+Person $i$'s phenotype in draw $t$ is then $g^{(t)}(z_i^{(t)})$. A person can have different phenotypes in different draws, and that variation is the allocation uncertainty.
+
+## Step 3: prevalences and phenotype summaries
+
+In draw $t$, the prevalence of phenotype $g$ is its weighted share:
+
+$$
+\pi_g^{(t)} = \frac{\sum_i w_i\, \mathbf{1}\!\left(\text{phenotype of } i \text{ in draw } t = g\right)}{\sum_i w_i} .
+$$
+
+The estimate $\hat\pi_g$ is the mean of these over the 1,000 draws. This is a Hájek-type weighted proportion averaged over the posterior. In the same pass, each phenotype's weighted mean and covariance are computed per draw and averaged; @sec-score-hessian needs them.
+
+## When $\hat K$ differs from the true number
+
+In simulation, the true number of phenotypes is known ($K_0 = 4$). When the groups are numbered for comparison with the truth, four groups are named by the quadrant of their centroids, which matches the layout of the true phenotypes and uses no true parameters.
+
+The main `dpmm_fit.R` drops a replicate whose $\hat K \ne 4$: its prevalences are missing, and summaries use only replicates with $\hat K = 4$. Since 14 November 2026 the psusize copy keeps such replicates. It computes prevalences and standard errors for however many groups it found and saves them in a `level` entry, so a coarser answer can be scored against the true phenotypes merged in the same way (`checks/check_levels.R`).
+
+## Check your understanding
+
+1. Why can one phenotype need several Gaussian components?
+2. What does $\Delta_{ij}$ measure, and when is it 0?
+3. Why is each draw mapped onto the partition, rather than using the partition alone?
+
+::: {.callout-tip collapse="true"}
+## Answers
+1. When its biomarkers are not Gaussian, for example skewed, several Gaussians side by side are needed to describe it.
+2. The posterior mean Hellinger distance between the components that persons $i$ and $j$ are assigned to. It is 0 when they are always in the same component.
+3. A single partition gives one prevalence with no posterior spread. Mapping every draw keeps the allocation uncertainty in the prevalence draws.
+:::

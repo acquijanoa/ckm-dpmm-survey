@@ -1,684 +1,83 @@
-# Computational Codebook & Reference Implementation {#sec-codebook}
+# Map of the Code {#sec-codebook}
 
-## Software Architecture & Dependencies
+This chapter points to where each step of the method lives and how to run it. It does not reproduce the code, which changes faster than the book; read the files themselves for the current version. Paths are relative to the repository root.
 
-This chapter provides a complete, self-contained, production-grade computational reference implementation of the **Survey-Weighted Dirichlet Process Mixture Model (DPMM)** with **Stratified Cluster Jackknife Variance Estimation** and **Affine Projection**.
+## Where each step lives
 
-Every mathematical step derived in Chapters 1 through 5 is implemented here:
-1. **High-performance C++ sampling kernels** for MCMC categorical responsibility evaluation and Dirichlet weight sampling.
-2. **Blocked Gibbs sampler** with survey-weighted conjugate Normal-Inverse-Wishart updates.
-3. **Zero-waste full-chain retention** and Stephens label-switching alignment.
-4. **Data-driven clustering & threshold consolidation** via the posterior similarity matrix (PSM) and `mcclust::maxpear`.
-5. **Sub-mixture density reconstruction** ($a_{ik}$) mapping raw fitted components to consolidated phenotypes.
-6. **Marginal profile Hessian** ($H_{\hat\pi}$) and **stratified delete-PSU cluster jackknife** ($J_{\text{jack}}$).
-7. **Total-variance recombination & affine Cholesky transformation** with design-degrees-of-freedom quantile scaling.
-8. **An end-to-end master orchestrator** (`estimate_survey_dpmm`) and a runnable toy example.
+All functions below are in `simulations/src/R/dpmm_fit.R` unless noted. The psusize design has its own copy, `simulations/psusize_design/src/R/dpmm_fit.R`, which has diverged (see below).
 
-### Setting the Environment
+| Step | Function | Chapter |
+| :--- | :--- | :--- |
+| Rescale weights | `scale_weights` | @sec-weights |
+| Gibbs sampler | `fit_wdpmm` | @sec-gibbs |
+| Exact MH sampler | `fit_wdpmm_mh` | @sec-gibbs |
+| Exact HMC sampler | `simulations/src/R/hmc_fit.R`, `simulations/src/stan/pi_w.stan` | @sec-gibbs |
+| FOLD merge | `fold_partition`, `fold_hellinger_draws`, `fold_delta_cpp` | @sec-phenotypes |
+| Map draws to phenotypes; prevalences | `summarize_phenotypes` | @sec-phenotypes |
+| Scores and Hessian | `unit_scores`, `sandwich_core` | @sec-score-hessian |
+| Between-PSU meat; standard errors and flags | `jackknife_sandwich_cpp`, `godambe_sandwich` | @sec-jackknife |
+| One replicate end to end | `run_one_sample`, `run_and_save_sample` | — |
+| Summaries across replicates | `simulations/src/R/summarize.R` | @sec-simulations |
 
-```r
-# Prepend personal R library if running on HPC cluster (e.g., Longleaf)
-personal_lib <- "/nas/longleaf/home/aquijano/R/x86_64-pc-linux-gnu-library/4.5"
-if (dir.exists(personal_lib) && !(personal_lib %in% .libPaths())) {
-  .libPaths(c(personal_lib, .libPaths()))
-}
+C++ helpers are in `simulations/src/cpp/dpmm_helpers.cpp`: `sample_z_cpp` (allocations), `sparse_dirichlet_weights_cpp` (component weights), `jackknife_sandwich_cpp` (meat) and `fold_delta_cpp` (FOLD distances). They are compiled with Rcpp when `dpmm_fit.R` is sourced.
 
-suppressPackageStartupMessages({
-  library(MASS)
-  library(mvtnorm)
-  library(label.switching)
-  library(mcclust)
-  library(coda)
-  library(Rcpp)
-  library(RcppArmadillo)
-})
-```
+## Options
 
----
+`dpmm_fit.R` is configured by environment variables, read once at the top. Each value other than the default adds a suffix to the result tag, so different settings never overwrite each other.
 
-## High-Performance C++ Sampling Kernels (`dpmm_helpers.cpp`)
+| Option | Values (default first) | Meaning |
+| :--- | :--- | :--- |
+| `POP_SCENARIO` | base, rare, skew, overlap | Population |
+| `N_PSU` | 4 (main), 2 (psusize) | PSUs per stratum |
+| `MERGE` | fold_unweighted, fold | Merge rule (the code's default is still an earlier rule; always set `MERGE` explicitly) |
+| `FOLD_CUT` | gap, avg | FOLD cut (psusize copy only) |
+| `SAMPLER` | gibbs, mh | Sampler |
+| `WEIGHT_SUM` | neff, n, one | Weight total |
+| `ALPHA0`, `L`, `KAPPA0` | 0.001, 10, 0.5 | Prior settings |
+| `CHAIN` | 1 | Chain number; changes the seed |
+| `OUT_TAG` | — | Replaces the result tag (smoke tests) |
 
-The active computational pipeline relies on three focused C++ kernels implemented via `RcppArmadillo` in `simulations/src/cpp/dpmm_helpers.cpp`:
+## How the two copies differ
 
-1. `sample_z_cpp`: Vectorized multinomial sampling of latent indicators.
-2. `sparse_dirichlet_weights_cpp`: Exact conjugate survey-weighted Dirichlet draws under the sparsity prior.
-3. `jackknife_sandwich_cpp`: Deterministic Rao–Wu delete-one-PSU cluster jackknife meat matrix.
+The psusize copy was taken on 10 November 2026 and has changed since. The main copy does not follow its changes.
 
-*(Note: Earlier pilot functions for covariate-dependent stick-breaking and Monte Carlo bootstrap variance estimation have been archived to `simulations/archive/src/cpp/dpmm_helpers_informed_arm.cpp` as dead code, keeping the active C++ codebase lean and production-focused).*
+| | Main `dpmm_fit.R` | psusize copy |
+| :--- | :--- | :--- |
+| FOLD cut | Elbow | Height gap, or $\gamma_{\text{AVG}}$ with `FOLD_CUT=avg` |
+| $\hat K \neq 4$ | Replicate dropped | Kept: results at every $\hat K$ in `level` |
 
-To compile and load these kernels into your R session:
+## Running a simulation
 
-```r
-Rcpp::sourceCpp("simulations/src/cpp/dpmm_helpers.cpp")
-```
-
-Below is each active kernel's mathematical derivation, purpose, and complete source code.
-
-### 1. Vectorized Categorical Indicator Sampler (`sample_z_cpp`)
-
-Draws latent cluster indicators $z_i \in \{1, \dots, L\}$ independently across all $n$ units given the normalized $n \times L$ conditional responsibility matrix $\mathbf{P}$ where $P_{ik} = \mathbb{P}(z_i = k \mid \mathbf{Y}_i, \dots)$. By generating $n$ uniform random variables $u_i \sim \mathcal{U}(0, 1)$ in a single vectorized pass in C++, this avoids $n$ separate R interpreter function calls per Gibbs iteration.
-
-```cpp
-#include <RcppArmadillo.h>
-// [[Rcpp::depends(RcppArmadillo)]]
-// [[Rcpp::plugins(cpp11)]]
-
-using namespace Rcpp;
-
-// [[Rcpp::export]]
-IntegerVector sample_z_cpp(const NumericMatrix& probs) {
-    int n = probs.nrow();
-    int L = probs.ncol();
-    IntegerVector z(n);
-
-    for (int i = 0; i < n; ++i) {
-        double u = R::runif(0.0, 1.0);
-        double cum = 0.0;
-        int chosen = L;
-        for (int k = 0; k < L; ++k) {
-            cum += probs(i, k);
-            if (u <= cum || k == L - 1) {
-                chosen = k + 1; // 1-based index for R
-                break;
-            }
-        }
-        z[i] = chosen;
-    }
-    return z;
-}
-```
-
-### 2. Survey-Weighted Sparse Dirichlet Sampling (`sparse_dirichlet_weights_cpp`)
-
-Implements the exact conjugate Dirichlet update for mixture weights under Rousseau & Mengersen (2011) overfitted mixture theory:
-$$\boldsymbol{\pi} \sim \text{Dirichlet}\left(\frac{\alpha_0}{L} + n_1, \dots, \frac{\alpha_0}{L} + n_L\right), \quad n_k = \sum_{i=1}^n w_i \mathbb{I}(z_i = k)$$
-Sampling is performed via independent Gamma draws $g_k \sim \text{Gamma}(\alpha_0/L + n_k, 1)$ normalized by $\sum_k g_k$. When $\alpha_0 < p/2$, redundant components asymptotically receive posterior weight zero and drop out.
-
-```cpp
-// [[Rcpp::export]]
-NumericVector sparse_dirichlet_weights_cpp(const IntegerVector& z,
-                                           const NumericVector& w,
-                                           int L, double alpha0) {
-    int n = z.size();
-    std::vector<double> n_k(L + 1, 0.0); // 1-based
-    for (int i = 0; i < n; ++i) n_k[z[i]] += w[i];
-
-    NumericVector pi0(L);
-    double total = 0.0;
-    double shape0 = alpha0 / (double)L;
-    for (int k = 1; k <= L; ++k) {
-        double shape = shape0 + n_k[k];
-        double g = R::rgamma(shape, 1.0);
-        g = std::max(g, 1e-300);
-        pi0[k - 1] = g;
-        total += g;
-    }
-    for (int k = 0; k < L; ++k) pi0[k] /= total;
-    return pi0;
-}
-```
-
-### 3. Stratified Delete-One-PSU Jackknife Meat Matrix (`jackknife_sandwich_cpp`)
-
-For linear (additive-over-PSU) profile score totals $\mathbf{S}_{\pi} = \sum_{h=1}^H \sum_{i \in \mathcal{S}_h} \mathbf{t}_{hi}$, the delete-one-PSU jackknife estimator reduces algebraically to the exact, closed-form Rao–Wu ultimate cluster variance:
-$$\mathbf{J}_{\text{jack}} = \sum_{h=1}^H \frac{n_h}{n_h - 1} \sum_{i=1}^{n_h} (\mathbf{t}_{hi} - \bar{\mathbf{t}}_h)(\mathbf{t}_{hi} - \bar{\mathbf{t}}_h)^\top$$
-This is the $B \to \infty$ limit of a cluster bootstrap with zero Monte Carlo resampling noise and no resampling hyperparameter $B$. Strata with a single sampled PSU ($n_h < 2$) contribute zero.
-
-```cpp
-// [[Rcpp::export]]
-arma::mat jackknife_sandwich_cpp(const arma::mat& psu_scores,
-                                  const Rcpp::List& stratum_psu_indices) {
-    int Kd = psu_scores.n_cols;
-    int H = stratum_psu_indices.size();
-    arma::mat J_hat(Kd, Kd, arma::fill::zeros);
-
-    for (int h = 0; h < H; ++h) {
-        Rcpp::IntegerVector psus_in_h = stratum_psu_indices[h];
-        int nh = psus_in_h.size();
-        if (nh < 2) continue;
-
-        arma::rowvec tbar_h(Kd, arma::fill::zeros);
-        for (int i = 0; i < nh; ++i) tbar_h += psu_scores.row(psus_in_h[i]);
-        tbar_h /= (double)nh;
-
-        arma::mat stratum_contrib(Kd, Kd, arma::fill::zeros);
-        for (int i = 0; i < nh; ++i) {
-            arma::rowvec dev = psu_scores.row(psus_in_h[i]) - tbar_h;
-            stratum_contrib += dev.t() * dev;
-        }
-        J_hat += (nh / (double)(nh - 1)) * stratum_contrib;
-    }
-
-    return J_hat;
-}
-```
-
-
----
-
-## Blocked Gibbs Sampler Kernel (`fit_wdpmm`)
-
-This function fits the truncated Dirichlet process mixture model using unweighted unit classification and survey-weighted aggregate Normal-Inverse-Wishart updates:
-
-```r
-floor_eigen <- function(Sigma, floor = 0.05) {
-  eig <- eigen(Sigma, symmetric = TRUE)
-  vals <- pmax(eig$values, floor)
-  eig$vectors %*% diag(vals, nrow = length(vals)) %*% t(eig$vectors)
-}
-
-#' Blocked Gibbs Sampler for Survey-Weighted DPMM
-#' @param Y Manifest variables matrix (n x P)
-#' @param w Normalized survey weights (length n, sum(w) = n)
-#' @param L Truncation level (default 10)
-#' @param n_iter Total MCMC iterations (default 1500)
-#' @param n_burnin Burn-in iterations (default 500)
-#' @param alpha0 Sparse Dirichlet concentration parameter (default 1.0)
-fit_wdpmm <- function(Y, w, L = 10, n_iter = 1500, n_burnin = 500,
-                       alpha0 = 1.0, kappa0 = 0.5, nu0 = ncol(Y) + 2) {
-  n <- nrow(Y); p <- ncol(Y)
-  mu0 <- colSums(Y * w) / sum(w)
-  Psi0 <- diag(colSums(w * sweep(Y, 2, mu0)^2) / sum(w)) * (nu0 - p - 1)
-  
-  z <- sample.int(L, n, replace = TRUE)
-  mu_k <- lapply(seq_len(L), function(k) mu0 + rnorm(p, 0, 1))
-  Sigma_k <- lapply(seq_len(L), function(k) diag(p))
-  
-  keep <- (n_burnin + 1):n_iter
-  z_draws <- matrix(NA_integer_, length(keep), n)
-  draw_idx <- 0
-  
-  for (iter in seq_len(n_iter)) {
-    # 1. Update population mixture weights under sparse Dirichlet prior
-    pi_k <- sparse_dirichlet_weights_cpp(z, w, L, alpha0)
-    
-    # 2. Draw unweighted latent allocations via log-sum-exp and C++ sampler
-    logp <- matrix(-Inf, n, L)
-    for (k in seq_len(L)) {
-      dens <- tryCatch(
-        mvtnorm::dmvnorm(Y, mean = mu_k[[k]], sigma = Sigma_k[[k]], log = TRUE),
-        error = function(e) rep(-1e10, n)
-      )
-      logp[, k] <- log(pmax(pi_k[k], 1e-12)) + dens
-    }
-    logp <- logp - apply(logp, 1, max)
-    probs <- exp(logp); probs <- probs / rowSums(probs)
-    z <- sample_z_cpp(probs)
-    
-    # 3. Update component parameters via survey-weighted conjugate NIW
-    for (k in seq_len(L)) {
-      idx <- which(z == k)
-      if (length(idx) == 0) {
-        mu_k[[k]] <- mu0 + MASS::mvrnorm(1, rep(0, p), Psi0 / (nu0 - p - 1))
-        Sigma_k[[k]] <- solve(rWishart(1, nu0, solve(Psi0))[, , 1])
-        next
-      }
-      wk <- w[idx]; Yk <- Y[idx, , drop = FALSE]
-      nk_eff <- sum(wk)
-      ybar_k <- colSums(Yk * wk) / nk_eff
-      d <- sweep(Yk, 2, ybar_k)
-      Sk <- crossprod(d * sqrt(wk))
-      
-      kappa_n <- kappa0 + nk_eff
-      nu_n    <- nu0 + nk_eff
-      mu_n    <- (kappa0 * mu0 + nk_eff * ybar_k) / kappa_n
-      d0 <- ybar_k - mu0
-      Psi_n <- Psi0 + Sk + (kappa0 * nk_eff / kappa_n) * outer(d0, d0)
-      
-      Sigma_draw <- solve(rWishart(1, nu_n, solve(Psi_n))[, , 1])
-      Sigma_k[[k]] <- floor_eigen(Sigma_draw)
-      mu_k[[k]] <- MASS::mvrnorm(1, mu_n, Sigma_k[[k]] / kappa_n)
-    }
-    
-    if (iter %in% keep) {
-      draw_idx <- draw_idx + 1
-      z_draws[draw_idx, ] <- z
-    }
-  }
-  list(z_draws = z_draws, mu_k = mu_k, Sigma_k = Sigma_k)
-}
-```
-
----
-
-## Data-Driven Merging & Threshold Consolidation
-
-When true component centroids and $K_0$ are unknown, the unit-level partition is estimated from the posterior similarity matrix via `mcclust::maxpear`, followed by iterative threshold consolidation:
-
-```r
-#' Consolidate Small or Close Cluster Fragments
-#' @param z Integer vector of cluster assignments (length n)
-#' @param Y Matrix of continuous biomarker manifest variables (n x P)
-#' @param w Normalized survey weights (length n, sum(w) = n)
-#' @param min_weight_frac Minimum weight fraction required for an independent cluster (default 0.02)
-#' @param min_sep Minimum Euclidean centroid distance required between distinct clusters (default 1.5)
-#' @return Consolidated cluster assignment vector with contiguous labels 1..K_final
-merge_small_close_groups <- function(z, Y, w, min_weight_frac = 0.02, min_sep = 1.5) {
-  total_w <- sum(w)
-  repeat {
-    groups <- sort(unique(z))
-    K <- length(groups)
-    if (K <= 1) break
-
-    wt <- sapply(groups, function(g) sum(w[z == g]))
-    centroids <- t(sapply(groups, function(g) {
-      idx <- which(z == g)
-      colSums(Y[idx, , drop = FALSE] * w[idx]) / sum(w[idx])
-    }))
-
-    dmat <- as.matrix(dist(centroids))
-    diag(dmat) <- Inf
-
-    # Condition 1: Merge satellite clusters with < min_weight_frac into nearest neighbor
-    smallest_idx <- which.min(wt)
-    if (wt[smallest_idx] / total_w < min_weight_frac) {
-      g_small  <- groups[smallest_idx]
-      g_target <- groups[which.min(dmat[smallest_idx, ])]
-      z[z == g_small] <- g_target
-      next
-    }
-
-    # Condition 2: Merge pairs of clusters closer than min_sep
-    min_pair <- which(dmat == min(dmat), arr.ind = TRUE)[1, ]
-    if (dmat[min_pair[1], min_pair[2]] < min_sep) {
-      z[z == groups[min_pair[2]]] <- groups[min_pair[1]]
-      next
-    }
-    break
-  }
-  match(z, sort(unique(z)))  # Relabel to contiguous 1..K_final
-}
-```
-
----
-
-## Zero-Waste Label Alignment & Sub-Mixture Reconstruction
-
-This routine aligns MCMC labels across iterations, maps transient labels to active components without dropping draws, determines consolidated phenotypes, and reconstructs the sub-mixture density matrix $a_{ik}$:
-
-```r
-#' Relabel Draws, Consolidate Phenotypes, and Build Sub-Mixture Densities
-#' @param fit Output list from fit_wdpmm
-#' @param Y Manifest variables matrix (n x P)
-#' @param w Normalized survey weights (length n)
-relabel_and_reconstruct <- function(fit, Y, w, min_weight_frac = 0.02, min_sep = 1.5) {
-  z_draws <- fit$z_draws
-  m <- nrow(z_draws); n <- ncol(z_draws)
-  
-  # 1. Zero-waste active label identification
-  occ_sorted <- sort(table(z_draws), decreasing = TRUE)
-  cum_frac <- cumsum(occ_sorted) / sum(occ_sorted)
-  K_active <- max(2, min(which(cum_frac >= 0.99)))
-  top_k <- as.integer(names(occ_sorted)[seq_len(K_active)])
-  remap <- setNames(seq_along(top_k), top_k)
-  
-  # Remap transient labels to nearest active centroid (Zero-Waste)
-  inactive <- setdiff(as.integer(names(occ_sorted)), top_k)
-  if (length(inactive) > 0) {
-    top_mu <- do.call(rbind, fit$mu_k[top_k])
-    nearest <- sapply(inactive, function(ell) {
-      d <- sqrt(rowSums(sweep(top_mu, 2, fit$mu_k[[ell]])^2))
-      top_k[which.min(d)]
-    })
-    remap <- c(remap, setNames(remap[as.character(nearest)], inactive))
-  }
-  z_collapsed <- matrix(remap[as.character(z_draws)], m, n)
-  
-  # 2. Stephens (2000) label alignment across retained iterations
-  p_alloc <- array(0, dim = c(m, n, K_active))
-  for (i in seq_len(m)) {
-    p_alloc[i, , ] <- model.matrix(~ factor(z_collapsed[i, ], levels = seq_len(K_active)) - 1)
-  }
-  stephens_fit <- label.switching::stephens(p_alloc)
-  z_aligned <- matrix(NA_integer_, m, n)
-  for (i in seq_len(m)) {
-    perm <- stephens_fit$permutations[i, ]
-    z_aligned[i, ] <- perm[z_collapsed[i, ]]
-  }
-  
-  # 3. Data-driven PSM + maxpear partition
-  psm <- mcclust::comp.psm(z_aligned)
-  mp <- mcclust::maxpear(psm)
-  z_hat <- as.integer(mp$cl)
-  
-  # 4. Threshold consolidation
-  z_consolidated <- merge_small_close_groups(z_hat, Y, w, min_weight_frac, min_sep)
-  K_hat <- length(unique(z_consolidated))
-  
-  # 5. Map raw active components to consolidated phenotypes
-  z_last <- z_aligned[m, ]
-  raw_to_pheno <- sapply(seq_len(K_active), function(k) {
-    idx <- which(z_last == k)
-    if (length(idx) == 0) return(1L)
-    as.integer(names(which.max(table(z_consolidated[idx]))))
-  })
-  
-  # 6. Compute aligned prevalence draws across iterations
-  prev_draws <- matrix(0, m, K_hat)
-  for (i in seq_len(m)) {
-    z_m <- raw_to_pheno[z_aligned[i, ]]
-    for (k in seq_len(K_hat)) prev_draws[i, k] <- sum(w[z_m == k]) / sum(w)
-  }
-  
-  # 7. Reconstruct sub-mixture density matrix a_mat (n x K_hat)
-  raw_w <- sapply(top_k, function(ell) sum(w[z_draws[m, ] == ell]))
-  a_mat <- matrix(0, n, K_hat)
-  for (j in seq_len(K_hat)) {
-    raw_members <- top_k[which(raw_to_pheno == j)]
-    wj <- raw_w[which(raw_to_pheno == j)]
-    wj <- wj / sum(wj)
-    dens_j <- matrix(0, n, length(raw_members))
-    for (t in seq_along(raw_members)) {
-      ell <- raw_members[t]
-      dens_j[, t] <- mvtnorm::dmvnorm(Y, mean = fit$mu_k[[ell]], sigma = fit$Sigma_k[[ell]])
-    }
-    a_mat[, j] <- as.numeric(dens_j %*% wj)
-  }
-  
-  list(prev_draws = prev_draws, a_mat = a_mat, K_hat = K_hat, z_point = z_consolidated)
-}
-```
-
----
-
-## Analytical Profile Hessian & Score Functions
-
-The marginal profile score vector and observed information bread matrix are computed directly from the sub-mixture density matrix `a_mat`:
-
-```r
-#' Compute Analytical Profile Hessian and Sample Score
-#' @param a_mat Matrix of sub-mixture densities (n x K_hat)
-#' @param pi_bar Current prevalence vector (length K_hat)
-#' @param weights Survey weights (length n, normalized to sum(w) = n)
-#' @return List containing H_hat ((K_hat-1) x (K_hat-1)) and score_mat (n x (K_hat-1))
-compute_profile_hessian_and_scores <- function(a_mat, pi_bar, weights) {
-  n <- nrow(a_mat)
-  K_hat <- ncol(a_mat)
-  K_free <- K_hat - 1
-  
-  # Marginal mixture density per unit
-  m_i <- as.vector(a_mat %*% pi_bar)
-  m_i <- pmax(m_i, 1e-12) # Protect against underflow
-  
-  # Contrasts against reference category K_hat
-  diff_mat <- a_mat[, 1:K_free, drop = FALSE] - a_mat[, K_hat]
-  
-  # Individual score contributions: w_i * (a_ik - a_iK) / m_i
-  score_mat <- (weights / m_i) * diff_mat
-  
-  # Analytical profile Hessian: H_hat = sum_i w_i * diff_i * diff_i' / m_i^2
-  w_scaled <- weights / (m_i^2)
-  H_hat <- matrix(0, nrow = K_free, ncol = K_free)
-  for (i in seq_len(n)) {
-    d_i <- diff_mat[i, ]
-    H_hat <- H_hat + w_scaled[i] * tcrossprod(d_i)
-  }
-  
-  list(H_hat = H_hat, score_mat = score_mat)
-}
-```
-
----
-
-## Stratified Delete-PSU Jackknife Implementation
-
-The deterministic delete-PSU jackknife routine calculates the meat matrix $J_{\text{jack}}$ across all strata and clusters:
-
-```r
-#' Stratified Delete-PSU Jackknife for Marginal Profile Score
-#' 
-#' Uses the high-performance C++ jackknife kernel `jackknife_sandwich_cpp`
-#' implementing the exact Rao-Wu closed-form delete-one-PSU ultimate cluster variance.
-#' 
-#' @param a_mat Matrix of sub-mixture densities (n x K_hat)
-#' @param pi_bar Current prevalence vector (length K_hat)
-#' @param weights Survey design weights
-#' @param strata Stratum indicator vector
-#' @param clusters Cluster (PSU) indicator vector
-#' @return The calibrated meat matrix J_jack ((K_hat-1) x (K_hat-1))
-compute_jackknife_meat <- function(a_mat, pi_bar, weights, strata, clusters) {
-  K_hat <- ncol(a_mat)
-  K_free <- K_hat - 1
-  m_i <- pmax(as.vector(a_mat %*% pi_bar), 1e-12)
-  diff_mat <- a_mat[, 1:K_free, drop = FALSE] - a_mat[, K_hat]
-  
-  # Unit score contributions: w_i * (a_ik - a_iK) / m_i
-  unit_scores <- (weights / m_i) * diff_mat
-  
-  # Map PSUs and strata for high-performance C++ kernel
-  psu_id <- interaction(strata, clusters, drop = TRUE)
-  unique_psus <- unique(psu_id)
-  n_psus <- length(unique_psus)
-  psu_map <- setNames(seq_len(n_psus) - 1L, as.character(unique_psus))
-  
-  # Aggregate score vectors per PSU
-  psu_scores <- matrix(0, n_psus, K_free)
-  for (i in seq_along(psu_id)) {
-    p_idx <- psu_map[[as.character(psu_id[i])]] + 1L
-    psu_scores[p_idx, ] <- psu_scores[p_idx, ] + unit_scores[i, ]
-  }
-  
-  # Build 0-based PSU index lists per stratum for C++
-  strata_ids <- unique(strata)
-  stratum_psu_indices <- lapply(strata_ids, function(h) {
-    h_psus <- unique(psu_id[strata == h])
-    as.integer(psu_map[as.character(h_psus)])
-  })
-  
-  # Call C++ kernel: deterministic delete-PSU jackknife
-  J_raw <- jackknife_sandwich_cpp(psu_scores, stratum_psu_indices)
-  
-  # Finite-sample design-df scale factor: c_corr = M / (M - H)
-  H <- length(strata_ids)
-  df_design <- max(n_psus - H, 1)
-  c_corr <- n_psus / df_design
-  
-  c_corr * J_raw
-}
-```
-
----
-
-## Total-Variance Recombination & Affine Projection
-
-This function executes the total-variance recombination and performs the affine Cholesky transformation on MCMC draws:
-
-```r
-#' Total-Variance Recombination and Affine Projection
-#' @param draws_free MCMC draws matrix (M x (K_hat-1))
-#' @param H_hat Profile Hessian matrix ((K_hat-1) x (K_hat-1))
-#' @param J_jack Jackknife meat matrix ((K_hat-1) x (K_hat-1))
-#' @return Affine-rotated draws on full simplex (M x K_hat)
-affine_project_draws <- function(draws_free, H_hat, J_jack) {
-  M <- nrow(draws_free)
-  K_free <- ncol(draws_free)
-  K_hat <- K_free + 1
-  
-  # 1. Godambe Sandwich Covariance
-  H_inv <- solve(H_hat)
-  Sigma_sandwich <- H_inv %*% J_jack %*% H_inv
-  
-  # 2. Naive Empirical MCMC Covariance
-  Sigma_naive <- cov(draws_free)
-  
-  # 3. Total-Variance Recombination
-  Sigma_corrected <- Sigma_sandwich + Sigma_naive
-  
-  # 4. Cholesky Factorizations
-  R1 <- chol(Sigma_corrected) # R1' R1 = Sigma_corrected
-  R2 <- chol(Sigma_naive)     # R2' R2 = Sigma_naive
-  
-  # Affine rotation operator A = R2^{-1} R1
-  A <- solve(R2, R1)
-  
-  # 5. Transform Draws
-  mean_free <- colMeans(draws_free)
-  centered <- sweep(draws_free, 2, mean_free, "-")
-  rotated_free <- centered %*% A
-  rotated_free <- sweep(rotated_free, 2, mean_free, "+")
-  
-  # 6. Reconstruct Full Simplex
-  full_draws <- matrix(0, nrow = M, ncol = K_hat)
-  full_draws[, 1:K_free] <- rotated_free
-  full_draws[, K_hat] <- 1 - rowSums(rotated_free)
-  
-  # Simplex boundary protection (Euclidean projection if needed)
-  for (m in seq_len(M)) {
-    if (any(full_draws[m, ] < 0) || any(full_draws[m, ] > 1)) {
-      full_draws[m, ] <- pmax(full_draws[m, ], 0)
-      full_draws[m, ] <- full_draws[m, ] / sum(full_draws[m, ])
-    }
-  }
-  
-  full_draws
-}
-```
-
----
-
-## Master End-to-End Estimation Function (`estimate_survey_dpmm`)
-
-This single high-level function connects all individual steps into an end-to-end analysis:
-
-```r
-#' Estimate Survey-Weighted DPMM with Full Uncertainty Quantification
-#' @param Y Continuous biomarker matrix (n x P)
-#' @param weights Complex survey sampling weights (length n)
-#' @param strata Stratum indicator vector (length n)
-#' @param clusters Primary Sampling Unit (PSU) indicator vector (length n)
-#' @param L Truncation level (default 10)
-#' @param n_iter Total Gibbs iterations (default 1500)
-#' @param n_burnin Burn-in iterations (default 500)
-#' @return A list containing estimated prevalences, standard errors, 
-#'         design-df corrected 95% credible intervals, and projected draws.
-estimate_survey_dpmm <- function(Y, weights, strata, clusters,
-                                 L = 10, n_iter = 1500, n_burnin = 500,
-                                 min_weight_frac = 0.02, min_sep = 1.5) {
-  # 1. Normalize weights
-  n <- nrow(Y)
-  w <- weights * (n / sum(weights))
-  
-  # 2. Blocked Gibbs Sampler
-  cat("Running Blocked Gibbs Sampler...\n")
-  fit <- fit_wdpmm(Y, w, L = L, n_iter = n_iter, n_burnin = n_burnin)
-  
-  # 3. Label Alignment, Merging, & Sub-Mixture Density Reconstruction
-  cat("Aligning Labels & Consolidating Phenotypes...\n")
-  rec <- relabel_and_reconstruct(fit, Y, w, min_weight_frac, min_sep)
-  K_hat <- rec$K_hat
-  K_free <- K_hat - 1
-  pi_bar <- colMeans(rec$prev_draws)
-  
-  # 4. Profile Hessian & Stratified Delete-PSU Jackknife
-  cat("Computing Profile Hessian & Jackknife Variance...\n")
-  hess <- compute_profile_hessian_and_scores(rec$a_mat, pi_bar, w)
-  J_jack <- compute_jackknife_meat(rec$a_mat, pi_bar, w, strata, clusters)
-  
-  # 5. Total-Variance Recombination & Affine Projection
-  cat("Applying Total-Variance Affine Projection...\n")
-  draws_free <- rec$prev_draws[, 1:K_free, drop = FALSE]
-  projected_draws <- affine_project_draws(draws_free, hess$H_hat, J_jack)
-  
-  # 6. Degrees-of-Freedom Width Adjustment
-  H <- length(unique(strata))
-  M_psu <- length(unique(interaction(strata, clusters)))
-  df_design <- M_psu - H
-  t_crit <- qt(0.975, df = df_design)
-  z_crit <- qnorm(0.975)
-  width_scale <- t_crit / z_crit
-  
-  # 7. Summary Quantiles & Standard Errors
-  ci_lo_raw <- apply(projected_draws, 2, quantile, probs = 0.025)
-  ci_hi_raw <- apply(projected_draws, 2, quantile, probs = 0.975)
-  
-  ci_lo <- pi_bar - (pi_bar - ci_lo_raw) * width_scale
-  ci_hi <- pi_bar + (ci_hi_raw - pi_bar) * width_scale
-  est_se <- apply(projected_draws, 2, sd) * width_scale
-  
-  results_table <- data.frame(
-    Phenotype  = seq_len(K_hat),
-    Prevalence = round(pi_bar, 4),
-    Std_Error  = round(est_se, 4),
-    CI_Lower   = round(pmax(0, ci_lo), 4),
-    CI_Upper   = round(pmin(1, ci_hi), 4)
-  )
-  
-  cat("Estimation Complete!\n\n")
-  list(
-    summary_table   = results_table,
-    projected_draws = projected_draws,
-    K_hat           = K_hat,
-    df_design       = df_design,
-    z_point         = rec$z_point
-  )
-}
-```
-
----
-
-## Minimal Reproducible Toy Example
-
-The following self-contained script demonstrates how to simulate synthetic stratified clustered survey data and estimate population phenotypes end-to-end:
-
-```r
-# 1. Simulate a synthetic stratified clustered sample (n = 300, P = 3, K = 2)
-set.seed(42)
-n_units <- 300
-n_strata <- 10
-strata <- rep(1:n_strata, each = 30)
-clusters <- rep(1:30, each = 10)
-weights <- runif(n_units, 0.5, 2.5)
-
-# Two underlying Gaussian clusters
-true_z <- rbinom(n_units, 1, 0.6) + 1
-Y <- matrix(rnorm(n_units * 3), n_units, 3)
-Y[true_z == 2, ] <- Y[true_z == 2, ] + 3.0 # Shift second cluster
-
-# 2. Compile C++ helpers
-Rcpp::sourceCpp(code = '...cpp code from Section 2...')
-
-# 3. Execute End-to-End Estimation
-results <- estimate_survey_dpmm(
-  Y = Y, 
-  weights = weights, 
-  strata = strata, 
-  clusters = clusters,
-  L = 5, 
-  n_iter = 500, 
-  n_burnin = 200
-)
-
-# 4. View Calibrated Output
-print(results$summary_table)
-```
-
----
-
-## HPC SLURM Batch Execution
-
-To execute full cohort estimation or large replication loops on a high-performance SLURM cluster:
+Everything heavy runs through SLURM, never on the login node. From `simulations/psusize_design/`:
 
 ```bash
-#!/bin/bash
-#SBATCH --job-name=dpmm_survey
-#SBATCH --output=logs/dpmm_%A_%a.out
-#SBATCH --error=logs/dpmm_%A_%a.err
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=1
-#SBATCH --mem=4G
-#SBATCH --time=02:00:00
-#SBATCH --array=1-1000%50
+# Smoke test: replicate 1 only (reused by the full array)
+sbatch -p general --array=1 --mem=2G \
+  --export=ALL,CHUNK=1,MERGE=fold_unweighted,POP_SCENARIO=overlap run_fit.sbatch
 
-module load r/4.5.0
-
-# Prepend personal R library
-export R_LIBS_USER="/nas/longleaf/home/aquijano/R/x86_64-pc-linux-gnu-library/4.5"
-
-# Execute production pipeline with data-driven merging and design-df correction
-export APPLY_CORR=1
-export UNKNOWN_K0=1
-export MERGE_THRESHOLD=1
-
-Rscript simulations/src/R/dpmm_fit.R
+# Full arm: 40 tasks of 25 replicates, about an hour each
+sbatch -p general --array=1-40 --mem=2G \
+  --export=ALL,CHUNK=25,MERGE=fold_unweighted,POP_SCENARIO=overlap,REP_TIMEOUT=30m run_fit.sbatch
 ```
+
+Each task runs its replicates in turn, skips any already saved, and logs one line per replicate (`[done]`, `[skipped]` or `[failed]`). Results go to `results/result_<tag>_<NNNN>.rds`; larger posterior objects to `posteriors_<tag>/`.
+
+To summarise an arm:
+
+```bash
+Rscript src/R/summarize.R <tag>       # per-phenotype table, all replicates
+Rscript checks/check_arm.R <tag>      # replicates with K_hat = 4 and an unflagged SE
+Rscript checks/check_levels.R <tag>   # every replicate, scored at the K_hat it reports
+```
+
+(Run these inside `srun` or `sbatch` on Longleaf.)
+
+## NHANES
+
+`nhanes/fit_nhanes.R` fits the same pipeline to NHANES 1999–2004 (one chain per call, $L = 20$). It takes the function definitions from the main `dpmm_fit.R` (not the psusize copy), so it follows the main copy. `nhanes/run_fold_reuse.sbatch` re-summarises saved fits with FOLD without refitting.
+
+## Where to find more
+
+- `logbook.md`: dated record of every run, result and decision.
+- `pseudolikelihood_framework.md`: the link to WOLCA and SWOLCA in detail.
+- `mode_merging_literature.md`: background on merging mixture components.

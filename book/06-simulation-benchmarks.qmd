@@ -1,135 +1,85 @@
-# Simulation Benchmarks & Empirical Proof {#sec-simulations}
+# Simulations {#sec-simulations}
 
-## Simulation Study Design
+This chapter summarises how the method performs in simulation, as of 14 November 2026. All numbers come from 1,000 replicates per scenario unless stated otherwise.
 
-To rigorously evaluate the inferential calibration of the survey-weighted DPMM, we conduct a large-scale Monte Carlo simulation study adhering to the complex survey simulation framework of @kim2024sampling.
+## How to read the results
 
-### Finite Population Generation
+- **Coverage** is the share of replicates whose 95% interval contains the true prevalence. With 1,000 replicates, Monte Carlo error alone puts a correct 95% procedure anywhere in **[93.6, 96.4]**. A coverage inside that band is not evidence of over- or under-coverage.
+- **SE ratio** is the empirical SD of the estimates across replicates divided by the mean estimated SE. Near 1 means the standard errors are right; below 1 means they are too large.
+- **$\hat K = 4$** is the share of replicates in which the merge step finds the true number of phenotypes. Unless stated otherwise, bias, SE ratio and coverage use only those replicates (with an unflagged SE).
 
-We generate a synthetic target population $\mathcal{U}$ of size $N \approx 40{,}000$ individuals structured hierarchically:
-* **Strata:** $H = 50$ strata.
-* **Clusters (PSUs):** The number of clusters in stratum $h$ is generated as:
-  $$
-  N_h = 5 \cdot \text{Poisson}(a_h) + 20, \quad a_h \sim \text{Gamma}(2, 2).
-  $$
-* **Elements:** The number of individuals in cluster $(h, i)$ is:
-  $$
-  M_{hi} = 5 \cdot \text{Poisson}(a_h + b_{hi}) + 150, \quad b_{hi} \sim \mathcal{N}(0, 0.25).
-  $$
+## Populations
 
-### Latent Phenotypic Model
+Both designs use four phenotypes in three biomarkers. The phenotype centroids sit at the corners of a square, $(\pm 2, \pm 2, \cdot)$, with diagonal covariances and standard deviations below 1. Phenotype membership depends on a person-level variable $x_2$ and on stratum and PSU random effects, so the design is informative and people in the same PSU resemble each other. Each design has four scenarios:
 
-Each individual belongs to one of $K_0 = 4$ true phenotypes. To generate realistic survey cluster correlation without distorting biological biomarker definitions, clustering enters via the latent phenotype probabilities:
-$$
-\Pr(z_{hij} = k \mid a_h, b_{hi}, X_{2, hij}) = \frac{\exp\left( (X_{2, hij} - 2)\beta_k + c \cdot (a_{hk} + b_{hik}) \right)}{\sum_{l=1}^4 \exp\left( (X_{2, hij} - 2)\beta_l + c \cdot (a_{hl} + b_{hil}) \right)},
-$$
-where:
-* $X_2 \sim \text{Exp}(1)$ is an individual-level socioeconomic risk factor.
-* $a_{hk} \sim \mathcal{N}(0, 1)$ is a stratum-level random effect.
-* $b_{hik} \sim \mathcal{N}(0, 1)$ is a cluster-level random effect.
-* $c = 0.3$ is the clustering intensity parameter, inducing design effects $\text{DEFF} \approx 1.5 - 2.5$.
+| Scenario | Change from base |
+| :--- | :--- |
+| base | Four well-separated Gaussian phenotypes |
+| rare | Phenotype 4 at about 4.6% |
+| skew | Biomarkers within each phenotype follow a standardised Gamma(2), same means and covariances |
+| overlap | Centroids moved halfway towards the centre, so neighbouring phenotypes overlap |
 
-Conditional on latent class $z_{hij} = k$, a 5-dimensional biomarker vector $Y_{hij} \in \mathbb{R}^5$ (representing SBP, DBP, HbA1c, eGFR, and HDL) is drawn from:
-$$
-Y_{hij} \mid z_{hij} = k \sim \mathcal{N}_5(\mu_k, \Sigma_k).
-$$
-The population prevalence vector across the finite population $\mathcal{U}$ is:
-$$
-\pi^{\text{pop}} = (\pi_1^{\text{pop}}, \pi_2^{\text{pop}}, \pi_3^{\text{pop}}, \pi_4^{\text{pop}})^\top = (0.2706, 0.2579, 0.2418, 0.2297)^\top.
-$$
+## Design 1: the main design (4 PSUs per stratum)
 
----
+Following Kim, Rao and Wang (2024, Supplement S9): 50 strata, about 1,250 PSUs of 150–225 people, $N \approx 200{,}000$. Stage 1 samples 4 PSUs per stratum with probability proportional to size; stage 2 samples people with probability proportional to $x_2$, for an overall sampling fraction of 1% ($n \approx 2{,}000$, 200 PSUs, df 150). PSU sizes vary little and do not affect the phenotypes, so the first stage is not informative.
 
-## Two-Stage Probability Sampling Design
+These results were obtained before FOLD was adopted, with an earlier merge rule (`simulations/night/report_prod.txt`); FOLD has not yet been run on this design. They show how the sandwich behaves when the phenotypes are recovered:
 
-From this finite population, we draw independent complex survey samples of size $n \approx 2{,}000$ using a two-stage sampling design:
-1. **Stage 1 (PSUs):** Within each stratum $h \in \{1, \dots, 50\}$, exactly $n_h = 4$ PSUs are sampled with Probability Proportional to Size (PPS) using cluster sizes $M_{hi}$. Total sampled clusters: $M = 50 \times 4 = 200$.
-2. **Stage 2 (Elements):** Within each selected PSU $(h, i)$, elements are sampled with probability proportional to the auxiliary design variable $X_2$ to achieve a target sampling fraction of $f = 0.01$.
-
-The sampling weight $w_i = 1 / \pi_i$ accounts for the joint two-stage inclusion probability. Weights are normalized such that $\sum_{i=1}^n w_i = n$.
-
----
-
-## Evaluation Metrics
-
-Across $R = 1{,}000$ independent sample replicates, we evaluate:
-
-1. **Latent Component Recovery ($K_0$ Recovery Rate):**
-   The percentage of replicates where the data-driven clustering rule recovers exactly $\hat{K} = K_0 = 4$ phenotypes.
-2. **Bias:**
-   $$
-   \text{Bias}(\hat{\pi}_k) = \frac{1}{R}\sum_{r=1}^R \hat{\pi}_{k, r} - \pi_k^{\text{pop}}.
-   $$
-3. **Empirical Standard Error (MC SE):**
-   $$
-   \text{SE}_{\text{emp}}(\hat{\pi}_k) = \sqrt{\frac{1}{R-1}\sum_{r=1}^R \left(\hat{\pi}_{k, r} - \bar{\pi}_k\right)^2}, \quad \bar{\pi}_k = \frac{1}{R}\sum_{r=1}^R \hat{\pi}_{k, r}.
-   $$
-4. **Model-Estimated Standard Error:**
-   $$
-   \overline{\text{SE}}(\hat{\pi}_k) = \frac{1}{R}\sum_{r=1}^R \widehat{\text{SE}}_r(\hat{\pi}_k).
-   $$
-5. **Standard Error Ratio (SE Ratio):**
-   $$
-   \text{SE Ratio} = \frac{\overline{\text{SE}}(\hat{\pi}_k)}{\text{SE}_{\text{emp}}(\hat{\pi}_k)}.
-   $$
-   An SE ratio near 1.00 indicates calibrated variance estimation.
-6. **Inferential Coverage (95% Coverage):**
-   The proportion of replicates where the nominal 95% credible interval contains the true finite-population prevalence $\pi_k^{\text{pop}}$.
-
----
-
-## Empirical Benchmark Results
-
-We evaluate $1{,}000$ independent Monte Carlo simulation replicates across four distinct methodological arms to rigorously disentangle:
-* **The component merging mechanism:** Unsupervised data-driven partition (via the posterior similarity matrix and `maxpear`) versus the oracle truth-based merge ceiling (matching fitted centroids to known $\mu_k^0$).
-* **The threshold consolidation rule:** Raw `maxpear` partition versus unsupervised threshold consolidation (minimum weight fraction $2\%$, minimum centroid separation $1.5$).
-* **The finite-sample design degrees-of-freedom correction:** Uncorrected sandwich variance ($c_{\text{corr}} = 1, z_{0.975} = 1.96$) versus design-df scaling ($c_{\text{corr}} = M / (M - H) = 200/150 = 1.333, t_{150, 0.975} = 1.976$).
-
-### Comparative Overview Across Experimental Arms
-
-@tbl-comparative-overview summarizes the latent dimension recovery, bias, and inferential coverage across all four configurations:
-
-| Pipeline Configuration | $K_0$ Recovery Rate | Bias ($\times 10^{-3}$) by Phenotype (1 / 2 / 3 / 4) | 95% Inferential Coverage by Phenotype (1 / 2 / 3 / 4) | Mean Coverage |
+| Scenario | $\hat K = 4$ | SE ratio | Coverage by phenotype | Mean coverage |
 | :--- | :---: | :---: | :---: | :---: |
-| **Data-driven, uncorrected (no threshold)** | $28.8\%$ | $+0.9, \; -2.5, \; +2.3, \; -0.8$ | $90.4\% \;/\; 92.4\% \;/\; 93.0\% \;/\; 93.5\%$ | $92.3\%$ |
-| **Data-driven + threshold, uncorrected** | **$98.2\%$** | $+0.7, \; -2.4, \; +1.7, \; -0.1$ | $89.6\% \;/\; 93.0\% \;/\; 93.4\% \;/\; 93.5\%$ | $92.4\%$ |
-| **Data-driven + threshold + corrected** | **$98.2\%$** | $+0.6, \; -1.5, \; +1.6, \; -0.7$ | **$92.5\% \;/\; 94.7\% \;/\; 96.4\% \;/\; 95.7\%$** | **$94.8\%$** |
-| **Truth-based merge + corrected (ceiling)** | $100\%$ *(oracle)* | $-0.6, \; -4.2, \; +1.2, \; +3.5$ | **$94.8\% \;/\; 94.4\% \;/\; 96.0\% \;/\; 96.9\%$** | **$95.5\%$** |
+| base | 99.8% | 0.99–1.03 | 95.0 / 93.1 / 94.6 / 94.2 | 94.2 |
+| rare | 99.5% | 0.92–1.01 | 95.3 / 92.4 / 94.5 / 96.2 | 94.6 |
+| skew | 71.2% | 0.80–0.85 | 83.9 / 87.0 / 92.9 / 81.1 | 86.2 |
+| overlap (52 replicates only) | 51.9% | 0.97–2.38 | 87.0 / 76.1 / 69.6 / 84.8 | 79.3 |
 
-: Comparative validation results across 1,000 complex survey replicates under two-stage stratified clustered sampling. {#tbl-comparative-overview}
+## Design 2: informative PSU sizes, 2 PSUs per stratum
 
----
+Folder `simulations/psusize_design/`. This design is closer to NHANES, which samples 2 PSUs per stratum. It follows the population of Zhou, Elliott and Raghunathan (2016) as used in the survey-martingale project:
 
-### Detailed Benchmark: Production Data-Driven Pipeline (with Threshold & Design-df)
+- 50 strata with a stratum effect $\gamma_h \sim \text{Unif}(-0.87, 0.87)$; PSU sizes from 69 to 1,529 (coefficient of variation 0.63), larger in strata with larger $\gamma_h$; $N = 482{,}392$ in 1,528 PSUs.
+- Phenotype 1 becomes more common as PSU size grows (23%, 33%, 41% across size tertiles), so the first stage is informative.
+- Stage 1 samples 2 PSUs per stratum with probability proportional to size (Brewer's method); stage 2 samples 1% of the stratum by systematic PPS on $x_2$, with exact inclusion probabilities. $n \approx 4{,}828$, 100 PSUs, df 50.
 
-@tbl-datadriven-detailed provides the complete per-phenotype operating characteristics for the primary production pipeline (**Data-driven + threshold + design-df corrected**), which requires no access to ground truth during estimation:
+### Results with FOLD
 
-| Phenotype | True Prevalence ($\pi_k^{\text{pop}}$) | Estimate ($\hat\pi$) | Bias | Empirical SE | Estimated SE | SE Ratio | Standard 95% Coverage | Centered Cov. (Test A) |
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Phenotype 1** | $0.2706$ | $0.2712$ | $+0.0006$ | $0.0210$ | $0.0211$ | **$1.00$** | **$92.5\%$** | $92.7\%$ |
-| **Phenotype 2** | $0.2579$ | $0.2564$ | $-0.0015$ | $0.0201$ | $0.0177$ | **$1.14$** | **$94.7\%$** | $95.3\%$ |
-| **Phenotype 3** | $0.2418$ | $0.2434$ | $+0.0016$ | $0.0175$ | $0.0194$ | **$0.90$** | **$96.4\%$** | $96.5\%$ |
-| **Phenotype 4** | $0.2297$ | $0.2290$ | $-0.0007$ | $0.0165$ | $0.0176$ | **$0.94$** | **$95.7\%$** | $95.9\%$ |
-| **Overall Mean** | — | — | **$0.0011$** | **$0.0188$** | **$0.0189$** | **$0.99$** | **$94.8\%$** | **$95.1\%$** |
+`fold_unweighted` with the height-gap cut:
 
-: Detailed validation metrics for the fully unsupervised survey-weighted DPMM with threshold consolidation and design-df Godambe correction ($n=1{,}000$ replicates). {#tbl-datadriven-detailed}
+| Scenario | $\hat K = 4$ | Replicates used | Largest bias | SE ratio | Coverage by phenotype | Mean coverage |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| base | 100% | 1,000 | 0.0009 | 0.97–1.02 | 94.2 / 93.7 / 94.7 / 96.1 | 94.7 |
+| rare | 100% | 1,000 | 0.0008 | 0.99–1.01 | 94.4 / 94.4 / 94.0 / 96.3 | 94.8 |
+| skew | 97.9% | 971 | 0.024 | 0.78–0.89 | 77.2 / 87.1 / 91.1 / 67.0 | 80.6 |
+| overlap | **30.8%** | 305 | 0.005 | 0.78–1.03 | 95.1 / 92.1 / 95.7 / 93.1 | 94.0 |
 
----
+## What the results show
 
-## Methodological Insights
+**Base and rare: calibrated.** When the phenotypes are distinct, FOLD recovers them in every replicate, bias is under 0.001, SE ratios are within a few percent of 1, and coverage is at the nominal level. The design with 2 PSUs per stratum did not cost coverage.
 
-The simulation results establish three core findings:
+**Skew: a bias that does not shrink.** People in the tail of a skewed phenotype are assigned to its neighbour. This biases the prevalences by up to about 0.02, and the bias does not fall with sample size while the standard errors do, so coverage drops to about 81–86%. It comes from fitting skewed groups with Gaussians, not from the merge: FOLD finds four groups in 98% of replicates, and the earlier merge rule on Design 1 shows the same bias. The standard errors are too large, not too small (SE ratio about 0.8).
 
-1. **Resolution of the Unknown-$K_0$ Challenge:**
-   * Naive posterior similarity matrix partitioning via `maxpear` alone achieves only $28.8\%$ exact $K_0$ recovery because small, transient components occasionally capture tiny outlier subsets.
-   * The unsupervised threshold consolidation rule (merging groups with $<2\%$ survey weight or centroid separation $<1.5$) completely eliminates spurious over-segmentation, boosting exact $K_0$ recovery to **$98.2\%$**. In the remaining $1.8\%$ of replicates, $\hat{K}$ never drops below 4, confirming zero risk of under-clustering.
+**Overlap: the cut is the issue.** Among replicates that find four groups, coverage is at the nominal level. The problem is how often four groups are found. With FOLD, the tree of merges almost always contains the right four groups, but the height-gap cut often stops at two or three.
 
-2. **Negligible Finite-Sample Bias:**
-   * Across all four phenotypes, point estimation bias is virtually non-existent ($|\text{Bias}| \le 0.0016$, relative bias $< 0.7\%$). 
-   * In fact, the data-driven merge exhibits smaller absolute bias on three of the four phenotypes than the truth-based oracle ceiling.
+## Choosing the FOLD cut
 
-3. **Nominal Inferential Calibration Without Ground Truth:**
-   * Applying the delete-one-PSU jackknife sandwich with total-variance recombination and the design degrees-of-freedom correction ($c_{\text{corr}} = M/(M-H)$ and $t_{M-H}$ quantiles) restores empirical 95% coverage to **$92.5\% - 96.4\%$** (mean **$94.8\%$**), within $1 - 2\%$ of the theoretical oracle ceiling ($94.8\% - 96.9\%$, mean $95.5\%$).
-   * Centered coverage (Test A) matches standard coverage within $0.2 - 0.6\%$, confirming that the small residual gap is pure sampling noise rather than location bias.
+The FOLD tree of 60 skew and 60 overlap samples (20 for base and rare) was cut with several rules. Samples with four groups, unweighted tree:
 
-This confirms that the survey-weighted DPMM with zero-waste full-chain retention, unsupervised threshold consolidation, and stratified cluster jackknife Godambe correction is fully calibrated and ready for application to real complex survey cohorts such as HCHS/SOL.
+| Cut | base (20) | rare (20) | skew (60) | overlap (60) |
+| :--- | :---: | :---: | :---: | :---: |
+| $\gamma_{\text{AVG}}$ | 20 | 19 | 59 | 45 |
+| Height gap | 20 | 20 | 60 | 16 |
+| Elbow (largest drop in $r$) | 0 | 0 | 0 | 1 |
+| Largest relative drop in $r$ | 20 | 18 | 41 | 20 |
+
+- The tree itself is right: its four-group level has one phenotype per group in 60 of 60 skew samples and 58 of 60 overlap samples.
+- $\gamma_{\text{AVG}}$, the default of @dombowsky2025fold, is the most even across scenarios and has no tuning constant.
+
+**Coarser answers are still correct answers.** When a cut stops early on overlap, the groups it reports are almost always unions of whole phenotypes (59 of 60 at two and at three groups). A three-group answer that merges two overlapping phenotypes estimates their combined prevalence. Scoring replicates at the level they report, against the true phenotypes merged the same way, is in progress (@sec-phenotypes).
+
+## Pending runs
+
+Submitted 14 November 2026, results expected around 16–17 November:
+
+- FOLD with the $\gamma_{\text{AVG}}$ cut on all four scenarios of Design 2, saving results at every $\hat K$.
+- FOLD with the height-gap cut on overlap, rerun to save results at every $\hat K$.
+
+These will give bias and coverage for $\gamma_{\text{AVG}}$, and coverage at the coarser levels.
